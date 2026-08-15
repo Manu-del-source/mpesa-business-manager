@@ -10,7 +10,6 @@ import {
   subMonths,
 } from "date-fns";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/generated/prisma/client";
 
 type Range = { from: Date; to: Date };
 

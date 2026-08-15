@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { requireAppContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { formatDateTime, formatKES, formatPhone } from "@/lib/format";
+import { formatDateTime, formatKES } from "@/lib/format";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";

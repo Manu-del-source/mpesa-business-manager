@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { requireAppContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatCompactKES, formatDateTime, formatKES, formatPhone } from "@/lib/format";
-import { lastMonthRange, thisMonthRange } from "@/lib/stats";
+import { lastMonthRange, pctChange, thisMonthRange } from "@/lib/stats";
 import { PageHeader } from "@/components/layout/page-header";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/layout/empty-state";
 import { SearchInput } from "@/components/layout/search-input";
@@ -88,6 +88,8 @@ export default async function MpesaPage({ searchParams }: { searchParams: Search
 
   const inThisMonth = monthIn._sum.amount?.toNumber() ?? 0;
   const outThisMonth = monthOut._sum.amount?.toNumber() ?? 0;
+  const inLastMonth = lastMonthIn._sum.amount?.toNumber() ?? 0;
+  const inDelta = pctChange(inThisMonth, inLastMonth);
 
   return (
     <div className="space-y-6">
@@ -108,6 +110,17 @@ export default async function MpesaPage({ searchParams }: { searchParams: Search
             </div>
             <p className="mt-2 text-2xl font-bold tracking-tight text-success">
               {formatCompactKES(inThisMonth)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {inDelta !== null ? (
+                <span className={cn("font-medium", inDelta >= 0 ? "text-success" : "text-destructive")}>
+                  {inDelta >= 0 ? "+" : ""}
+                  {inDelta.toFixed(0)}%
+                </span>
+              ) : (
+                "new"
+              )}{" "}
+              vs last month
             </p>
           </CardContent>
         </Card>

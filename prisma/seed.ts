@@ -63,11 +63,6 @@ function randomPhone(): string {
   return pick(WALKIN_PHONES);
 }
 
-/** 07XX XXX XXX */
-function toLocalPhone(national: string): string {
-  return `0${national.slice(3)}`;
-}
-
 function buildReceiptNo(date: Date, seq: number): string {
   return `RCP-${format(date, "yyyyMMdd")}-${String(seq).padStart(4, "0")}`;
 }

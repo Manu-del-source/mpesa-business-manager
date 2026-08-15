@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   Package,
+  Plus,
   ReceiptText,
   Settings,
   Smartphone,
@@ -17,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand/logo";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { signOutAction } from "@/app/(auth)/actions";
 
 export const NAV_ITEMS = [
@@ -35,6 +37,14 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav className="flex-1 space-y-1 px-3 py-4">
+      <Button asChild className="mb-3 w-full">
+        <Link href="/sales" onClick={onNavigate}>
+          <Plus className="h-4 w-4" /> New sale
+        </Link>
+      </Button>
+      <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Menu
+      </p>
       {NAV_ITEMS.map((item) => {
         const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (

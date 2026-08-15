@@ -104,11 +104,20 @@
   border-color: var(--border);
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: color-mix(in oklab, var(--color-brand-500) 35%, transparent);
+  color: var(--foreground);
 }
 
 /* Subtle dotted grid used on the landing page hero */

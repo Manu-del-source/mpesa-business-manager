@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -56,10 +55,10 @@ export function ExpenseFormDialog({
   expense?: {
     id: string;
     category: string;
-    amount: { toNumber(): number };
+    amount: number;
     description: string;
     vendor: string | null;
-    expenseDate: Date;
+    expenseDate: string;
   };
   variant?: "create" | "edit";
 }) {
@@ -71,7 +70,7 @@ export function ExpenseFormDialog({
     resolver: zodResolver(expenseSchema),
     defaultValues: {
       category: (expense?.category as z.infer<typeof expenseCategorySchema>) ?? "OTHER",
-      amount: expense ? expense.amount.toNumber() : undefined,
+      amount: expense ? expense.amount : undefined,
       description: expense?.description ?? "",
       vendor: expense?.vendor ?? "",
       expenseDate: expense ? new Date(expense.expenseDate) : new Date(),
