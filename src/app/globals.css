@@ -1,10 +1,5 @@
 @import "tailwindcss";
 
-/*
- * M-Pesa Business Manager — dark-first design system.
- * Brand green is M-Pesa green (#43B02A) on a near-black zinc base.
- */
-
 :root {
   --background: oklch(0.135 0.005 285.823);
   --foreground: oklch(0.98 0.002 285.8);
@@ -27,9 +22,7 @@
   --border: oklch(0.27 0.006 286.03);
   --input: oklch(0.27 0.006 286.03);
   --ring: oklch(0.74 0.17 148.5);
-  --radius: 0.7rem;
-
-  /* Brand (M-Pesa green) scale */
+  --radius: 0.75rem;
   --color-brand-50: oklch(0.97 0.03 150);
   --color-brand-100: oklch(0.93 0.06 150);
   --color-brand-200: oklch(0.88 0.09 150);
@@ -41,8 +34,6 @@
   --color-brand-800: oklch(0.44 0.11 148);
   --color-brand-900: oklch(0.35 0.09 148);
   --color-brand-950: oklch(0.25 0.06 148);
-
-  /* Chart palette */
   --chart-1: oklch(0.72 0.17 148);
   --chart-2: oklch(0.77 0.15 55);
   --chart-3: oklch(0.62 0.2 27);
@@ -51,98 +42,43 @@
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-
-  --color-brand-50: var(--color-brand-50);
-  --color-brand-100: var(--color-brand-100);
-  --color-brand-200: var(--color-brand-200);
-  --color-brand-300: var(--color-brand-300);
-  --color-brand-400: var(--color-brand-400);
-  --color-brand-500: var(--color-brand-500);
-  --color-brand-600: var(--color-brand-600);
-  --color-brand-700: var(--color-brand-700);
-  --color-brand-800: var(--color-brand-800);
-  --color-brand-900: var(--color-brand-900);
+  --color-background: var(--background); --color-foreground: var(--foreground);
+  --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success); --color-warning: var(--warning);
+  --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+  --color-brand-50: var(--color-brand-50); --color-brand-100: var(--color-brand-100);
+  --color-brand-200: var(--color-brand-200); --color-brand-300: var(--color-brand-300);
+  --color-brand-400: var(--color-brand-400); --color-brand-500: var(--color-brand-500);
+  --color-brand-600: var(--color-brand-600); --color-brand-700: var(--color-brand-700);
+  --color-brand-800: var(--color-brand-800); --color-brand-900: var(--color-brand-900);
   --color-brand-950: var(--color-brand-950);
-
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-
+  --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
-
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
 }
 
-* {
-  border-color: var(--border);
-}
-
-html {
-  scroll-behavior: smooth;
-}
-
+* { border-color: var(--border); }
+html { scroll-behavior: smooth; }
 body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+  background-color: var(--background); color: var(--foreground);
+  font-family: var(--font-sans); -webkit-font-smoothing: antialiased;
 }
-
-::selection {
-  background-color: color-mix(in oklab, var(--color-brand-500) 35%, transparent);
-  color: var(--foreground);
-}
-
-/* Subtle dotted grid used on the landing page hero */
+::selection { background-color: color-mix(in oklab, var(--color-brand-500) 35%, transparent); color: var(--foreground); }
 .hero-grid {
   background-image: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.07) 1px, transparent 0);
   background-size: 32px 32px;
 }
-
-/* Hide number input spinners */
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 input[type="number"]::-webkit-outer-spin-button,
-input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-input[type="number"] {
-  -moz-appearance: textfield;
-  appearance: textfield;
-}
-
-/* Thin scrollbars for dense tables */
-.thin-scroll::-webkit-scrollbar {
-  height: 6px;
-  width: 6px;
-}
-.thin-scroll::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 9999px;
-}
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.thin-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 9999px; }
