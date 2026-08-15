@@ -1,0 +1,23 @@
+# Local Postgres for development — matches Supabase's Postgres so the same
+# Prisma schema works everywhere.
+#
+# Usage:
+#   docker compose up -d
+#   cp .env.example .env        # DATABASE_URL already points at this database
+#   npm run db:push && npm run db:seed
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: mbm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mbm
+    ports:
+      - "5433:5432"
+    volumes:
+      - mbm_pgdata:/var/lib/postgresql/data
+
+volumes:
+  mbm_pgdata:
