@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { cloneElement, isValidElement, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Smartphone, XCircle } from "lucide-react";
 import { formatKES, formatPhone } from "@/lib/format";
@@ -10,9 +10,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -88,8 +86,13 @@ export function SaleDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>{children}</SheetTrigger>
-        <SheetContent className="overflow-y-auto p-0">
+      {isValidElement(children)
+        ? cloneElement(
+            children as React.ReactElement<{ onClick?: React.MouseEventHandler<HTMLElement> }>,
+            { onClick: () => setOpen(true) },
+          )
+        : children}
+      <SheetContent className="overflow-y-auto p-0">
           <SheetHeader className="border-b border-border p-5">
             <div className="flex items-center justify-between pr-8">
               <SheetTitle className="font-mono text-sm">{sale.receiptNo}</SheetTitle>

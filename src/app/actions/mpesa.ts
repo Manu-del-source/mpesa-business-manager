@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAppContext } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { completeStkPush, failStkPush, initiateStkPush } from "@/lib/mpesa";
 import { stkPushSchema } from "@/lib/validations";
 

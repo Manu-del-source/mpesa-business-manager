@@ -139,6 +139,30 @@ export default async function DashboardPage() {
         </Button>
       </PageHeader>
 
+      {/* Quick actions */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          { href: "/sales", label: "New sale", desc: "Ring up at the till", icon: ReceiptText, accent: "text-brand-400 bg-brand-500/15" },
+          { href: "/mpesa", label: "Send STK push", desc: "Request a payment", icon: Smartphone, accent: "text-chart-4 bg-chart-4/15" },
+          { href: "/expenses", label: "Record expense", desc: "Log a cost", icon: Wallet, accent: "text-chart-3 bg-chart-3/15" },
+          { href: "/inventory", label: "Add product", desc: "Stock your shelf", icon: Package, accent: "text-chart-2 bg-chart-2/15" },
+        ].map((a) => (
+          <Link
+            key={a.label}
+            href={a.href}
+            className="group flex items-center gap-3 rounded-lg border border-border bg-card p-3.5 transition-colors hover:border-brand-500/40 hover:bg-card/80"
+          >
+            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${a.accent}`}>
+              <a.icon className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{a.label}</span>
+              <span className="block truncate text-xs text-muted-foreground">{a.desc}</span>
+            </span>
+          </Link>
+        ))}
+      </div>
+
       {/* KPI cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((kpi) => (

@@ -22,8 +22,8 @@ import { Button } from "@/components/ui/button";
 import {
   ExpensesByCategoryChart,
   MonthlyPnlChart,
+  RevenueAreaChart,
 } from "@/components/dashboard/charts";
-import { EXPENSE_CATEGORY_LABELS } from "@/components/shared/status";
 import { cn } from "@/lib/utils";
 import { TrendingDown, TrendingUp } from "lucide-react";
 
@@ -166,6 +166,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base">Revenue — last 30 days</CardTitle>
+          <Badge variant="outline">{formatCompactKES(revenueSeries.reduce((sum, d) => sum + d.revenue, 0))} total</Badge>
+        </CardHeader>
+        <CardContent>
+          <RevenueAreaChart data={revenueSeries} />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

@@ -55,8 +55,8 @@ export function ProductFormDialog({
     sku: string | null;
     category: string;
     unit: string;
-    costPrice: { toNumber(): number };
-    sellingPrice: { toNumber(): number };
+    costPrice: number;
+    sellingPrice: number;
     stock: number;
     lowStockThreshold: number;
   };
@@ -74,8 +74,8 @@ export function ProductFormDialog({
       sku: product?.sku ?? "",
       category: product?.category ?? "General",
       unit: product?.unit ?? "pcs",
-      costPrice: product ? product.costPrice.toNumber() : undefined,
-      sellingPrice: product ? product.sellingPrice.toNumber() : undefined,
+      costPrice: product ? product.costPrice : undefined,
+      sellingPrice: product ? product.sellingPrice : undefined,
       stock: product?.stock ?? 0,
       lowStockThreshold: product?.lowStockThreshold ?? 5,
     },

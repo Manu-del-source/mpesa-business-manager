@@ -34,6 +34,27 @@ export const metadata: Metadata = { title: "Expenses" };
 
 type SearchParams = Promise<{ q?: string; category?: string }>;
 
+type ExpenseRow = {
+  id: string;
+  category: string;
+  amount: { toNumber(): number };
+  description: string;
+  vendor: string | null;
+  expenseDate: Date;
+};
+
+/** Convert a Prisma Expense row into a plain, serializable shape for client components. */
+function toPlainExpense(expense: ExpenseRow) {
+  return {
+    id: expense.id,
+    category: expense.category,
+    amount: expense.amount.toNumber(),
+    description: expense.description,
+    vendor: expense.vendor,
+    expenseDate: expense.expenseDate.toISOString(),
+  };
+}
+
 export default async function ExpensesPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await requireAppContext();
   const { q, category } = await searchParams;
@@ -187,7 +208,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Sea
                     {formatDate(expense.expenseDate)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <ExpenseFormDialog expense={expense} variant="edit" />
+                    <ExpenseFormDialog expense={toPlainExpense(expense)} variant="edit" />
                   </TableCell>
                 </TableRow>
               ))}
@@ -215,7 +236,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Sea
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <p className="font-bold tabular-nums">{formatKES(expense.amount)}</p>
-                  <ExpenseFormDialog expense={expense} variant="edit" />
+                  <ExpenseFormDialog expense={toPlainExpense(expense)} variant="edit" />
                 </div>
               </CardContent>
             </Card>

@@ -33,6 +33,35 @@ export const metadata: Metadata = { title: "Inventory" };
 
 type SearchParams = Promise<{ q?: string; category?: string; show?: string }>;
 
+type ProductRow = {
+  id: string;
+  name: string;
+  sku: string | null;
+  category: string;
+  unit: string;
+  costPrice: { toNumber(): number };
+  sellingPrice: { toNumber(): number };
+  stock: number;
+  lowStockThreshold: number;
+  active: boolean;
+};
+
+/** Convert a Prisma Product row into a plain, serializable shape for client components. */
+function toPlainProduct(product: ProductRow) {
+  return {
+    id: product.id,
+    name: product.name,
+    sku: product.sku,
+    category: product.category,
+    unit: product.unit,
+    costPrice: product.costPrice.toNumber(),
+    sellingPrice: product.sellingPrice.toNumber(),
+    stock: product.stock,
+    lowStockThreshold: product.lowStockThreshold,
+    active: product.active,
+  };
+}
+
 export default async function InventoryPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await requireAppContext();
   const { q, category, show } = await searchParams;
@@ -205,9 +234,9 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <StockAdjustButton product={product} />
-                        <ProductFormDialog product={product} variant="edit" />
-                        <ArchiveToggleButton product={product} />
+                        <StockAdjustButton product={toPlainProduct(product)} />
+                        <ProductFormDialog product={toPlainProduct(product)} variant="edit" />
+                        <ArchiveToggleButton product={toPlainProduct(product)} />
                       </div>
                     </TableCell>
                   </TableRow>
@@ -254,9 +283,9 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
                     </div>
                   </div>
                   <div className="mt-3 flex justify-end gap-1">
-                    <StockAdjustButton product={product} />
-                    <ProductFormDialog product={product} variant="edit" />
-                    <ArchiveToggleButton product={product} />
+                    <StockAdjustButton product={toPlainProduct(product)} />
+                    <ProductFormDialog product={toPlainProduct(product)} variant="edit" />
+                    <ArchiveToggleButton product={toPlainProduct(product)} />
                   </div>
                 </CardContent>
               </Card>

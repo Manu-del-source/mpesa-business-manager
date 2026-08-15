@@ -6,7 +6,6 @@ import { formatCompactKES, formatPhone } from "@/lib/format";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/layout/empty-state";
 import { SearchInput } from "@/components/layout/search-input";
 import { CustomerFormDialog } from "@/components/customers/customer-form-dialog";

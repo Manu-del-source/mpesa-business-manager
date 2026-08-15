@@ -6,7 +6,6 @@ import { requireAppContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatCompactKES, formatDateTime, formatKES, formatPhone } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CustomerFormDialog } from "@/components/customers/customer-form-dialog";
 import { PaymentMethodBadge, SaleStatusBadge } from "@/components/shared/status";
