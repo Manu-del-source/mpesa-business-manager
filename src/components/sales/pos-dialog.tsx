@@ -1,13 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  AlertCircle,
   CheckCircle2,
+  Clock,
   Loader2,
   Minus,
   Plus,
   ReceiptText,
+  RefreshCw,
   Smartphone,
   Trash2,
   XCircle,
@@ -35,6 +39,10 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { cancelSaleAction, completeMpesaSaleAction, createSaleAction } from "@/app/actions/sales";
+import {
+  getTransactionStatusAction,
+  reconcileTransactionAction,
+} from "@/app/actions/mpesa";
 
 type PosProduct = {
   id: string;
@@ -57,7 +65,11 @@ type CartLine = {
 };
 
 type Method = "MPESA" | "CASH" | "CARD" | "BANK_TRANSFER" | "CREDIT";
-type Phase = "cart" | "push" | "success";
+type Phase = "cart" | "push" | "success" | "failed";
+
+/** Stop waiting for the Safaricom callback after this long. */
+const POS_POLL_TIMEOUT_MS = 120_000;
+const POS_POLL_INTERVAL_MS = 3_000;
 
 const METHODS: { value: Method; label: string }[] = [
   { value: "MPESA", label: "M-Pesa" },
@@ -87,6 +99,23 @@ export function PosDialog({
     total: number;
     saleId: string;
   } | null>(null);
+  /** Set when Safaricom actually accepted the STK push (live Daraja mode). */
+  const [liveTxnId, setLiveTxnId] = useState<string | null>(null);
+  const [pushError, setPushError] = useState<string | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
+
+  const router = useRouter();
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const deadlineRef = useRef<number>(0);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => stopPolling, [stopPolling]);
 
   const activeProducts = useMemo(
     () => products.filter((p) => p.stock > 0),
@@ -98,17 +127,86 @@ export function PosDialog({
   const total = subtotal - discountValue;
 
   function resetAll() {
+    stopPolling();
     setCart([]);
     setCustomerId("");
     setPhone("");
     setDiscount("");
     setPhase("cart");
     setResult(null);
+    setLiveTxnId(null);
+    setPushError(null);
+    setTimedOut(false);
   }
 
   function closeDialog() {
     setOpen(false);
+    stopPolling();
+    router.refresh();
     setTimeout(resetAll, 300);
+  }
+
+  /**
+   * Live mode: the sale is only completed by the Safaricom callback, so poll
+   * the transaction until it settles (or we give up and show a timeout).
+   */
+  const startPolling = useCallback(
+    (transactionId: string) => {
+      stopPolling();
+      deadlineRef.current = Date.now() + POS_POLL_TIMEOUT_MS;
+
+      pollRef.current = setInterval(async () => {
+        const res = await getTransactionStatusAction({ transactionId });
+        const status = res.data?.status;
+
+        if (status === "SUCCESS") {
+          stopPolling();
+          setPhase("success");
+          router.refresh();
+          return;
+        }
+        if (status === "FAILED" || status === "CANCELLED" || status === "TIMEOUT") {
+          stopPolling();
+          setPushError(res.data?.resultDesc ?? "The payment was not completed.");
+          setPhase("failed");
+          router.refresh();
+          return;
+        }
+        if (Date.now() > deadlineRef.current) {
+          stopPolling();
+          setTimedOut(true);
+        }
+      }, POS_POLL_INTERVAL_MS);
+    },
+    [router, stopPolling],
+  );
+
+  /** Ask Safaricom directly for the outcome (STK Push Query). */
+  async function checkLiveStatus() {
+    if (!liveTxnId) return;
+    setBusy(true);
+    try {
+      const res = await reconcileTransactionAction({ transactionId: liveTxnId });
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
+      const status = res.data?.status;
+      if (status === "SUCCESS") {
+        stopPolling();
+        setPhase("success");
+        router.refresh();
+      } else if (status === "FAILED" || status === "CANCELLED" || status === "TIMEOUT") {
+        stopPolling();
+        setPushError(res.data?.resultDesc ?? "The payment was not completed.");
+        setPhase("failed");
+        router.refresh();
+      } else {
+        toast.info("Still waiting for the customer to pay.");
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   function addProduct(productId: string) {
@@ -201,6 +299,14 @@ export function PosDialog({
       }
       setResult({ receiptNo: data.receiptNo, total: parseFloat(data.total), saleId: data.saleId });
       setPhase(data.paymentMethod === "MPESA" ? "push" : "success");
+      router.refresh();
+
+      // Live Daraja push: wait for the Safaricom callback instead of offering
+      // a "simulate" shortcut.
+      if (data.mpesaMode === "daraja" && data.transactionId) {
+        setLiveTxnId(data.transactionId);
+        startPolling(data.transactionId);
+      }
     } finally {
       setBusy(false);
     }
@@ -441,28 +547,90 @@ export function PosDialog({
 
         {phase === "push" && result && (
           <div className="flex flex-col items-center py-6 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-500/15">
+            <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-brand-500/15">
               <Smartphone className="h-8 w-8 text-brand-400" />
+              {liveTxnId && !timedOut && (
+                <span className="absolute inset-0 animate-ping rounded-full border-2 border-brand-500/40" />
+              )}
             </div>
-            <h3 className="mt-4 text-lg font-semibold">STK push sent</h3>
+            <h3 className="mt-4 text-lg font-semibold">
+              {liveTxnId
+                ? timedOut
+                  ? "No response yet"
+                  : "Waiting for the customer…"
+                : "STK push sent"}
+            </h3>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">
               A payment request of <span className="font-semibold text-foreground">{formatKES(result.total)}</span> was
               sent to <span className="font-semibold text-foreground">{formatPhone(phone)}</span>.
               Ask the customer to enter their M-Pesa PIN.
             </p>
+
+            {liveTxnId ? (
+              <>
+                {timedOut ? (
+                  <p className="mt-3 flex items-center gap-1.5 text-xs text-warning">
+                    <Clock className="h-3 w-3" />
+                    Safaricom hasn&apos;t confirmed yet. The sale stays pending until it does.
+                  </p>
+                ) : (
+                  <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Waiting for Safaricom&apos;s confirmation…
+                  </p>
+                )}
+                <div className="mt-6 flex w-full max-w-xs flex-col gap-2">
+                  <Button variant="outline" onClick={checkLiveStatus} disabled={busy}>
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Check now
+                  </Button>
+                  <Button variant="ghost" onClick={closeDialog}>
+                    Continue in background
+                  </Button>
+                </div>
+                <p className="mt-4 text-[11px] text-muted-foreground">
+                  This sale completes automatically when the Daraja callback arrives.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="mt-6 flex w-full max-w-xs flex-col gap-2">
+                  <Button onClick={simulatePayment} disabled={busy}>
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    Simulate payment
+                  </Button>
+                  <Button variant="outline" onClick={cancelPush} disabled={busy}>
+                    <XCircle className="h-4 w-4" /> Cancel sale
+                  </Button>
+                </div>
+                <p className="mt-4 text-[11px] text-muted-foreground">
+                  Simulated mode stands in for the Safaricom callback. With Daraja
+                  configured the sale completes automatically via the webhook.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
+        {phase === "failed" && result && (
+          <div className="flex flex-col items-center py-6 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/15">
+              <AlertCircle className="h-8 w-8 text-destructive" />
+            </div>
+            <h3 className="mt-4 text-lg font-semibold">Payment not completed</h3>
+            <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+              {pushError ?? "The customer did not complete the M-Pesa payment."}
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Sale <span className="font-mono">{result.receiptNo}</span> was cancelled and
+              stock was not deducted.
+            </p>
             <div className="mt-6 flex w-full max-w-xs flex-col gap-2">
-              <Button onClick={simulatePayment} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Simulate payment
-              </Button>
-              <Button variant="outline" onClick={cancelPush} disabled={busy}>
-                <XCircle className="h-4 w-4" /> Cancel sale
+              <Button onClick={resetAll}>Start a new sale</Button>
+              <Button variant="ghost" onClick={closeDialog}>
+                Close
               </Button>
             </div>
-            <p className="mt-4 text-[11px] text-muted-foreground">
-              Demo mode simulates the Safaricom callback. In production the sale
-              completes automatically via the Daraja webhook.
-            </p>
           </div>
         )}
 

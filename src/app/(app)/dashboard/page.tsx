@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   AlertTriangle,
-  ArrowDownRight,
-  ArrowUpRight,
   ArrowRight,
   Banknote,
   Package,
@@ -27,19 +25,14 @@ import {
   pctChange,
   thisMonthRange,
 } from "@/lib/stats";
-import { formatCompactKES, formatKES, formatRelative } from "@/lib/format";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatCompactKES, formatKES, formatPhone, formatRelative } from "@/lib/format";
+import { Card, CardContent, CardToolbar } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/components/layout/page-header";
-import {
-  PaymentMethodDonut,
-  RevenueAreaChart,
-} from "@/components/dashboard/charts";
-import {
-  MpesaStatusBadge,
-  PaymentMethodBadge,
-} from "@/components/shared/status";
+import { StatCard } from "@/components/layout/stat-card";
+import { HeroPanel } from "@/components/dashboard/hero-panel";
+import { ActivityPanel, ActivityRow } from "@/components/dashboard/activity-list";
+import { PaymentMethodDonut, RevenueAreaChart } from "@/components/dashboard/charts";
+import { MpesaStatusBadge, PaymentMethodBadge } from "@/components/shared/status";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -52,37 +45,54 @@ export default async function DashboardPage() {
   const today = { from: startOfDay(new Date()), to: new Date() };
   const yesterday = lastNDaysRange(1);
 
-  const [todayRevenue, yesterdayRevenue, monthRevenue, lastMonthRevenue, monthMpesaIn, lastMonthMpesaIn, monthExpenses, lastMonthExpenses, lowStock, revenueSeries, paymentMethods, recentTxns, recentSales, lowStockProducts, todaySalesCount] =
-    await Promise.all([
-      getRevenue(ctx.orgId, today),
-      getRevenue(ctx.orgId, yesterday),
-      getRevenue(ctx.orgId, month),
-      getRevenue(ctx.orgId, lastMonth),
-      getMpesaIn(ctx.orgId, month),
-      getMpesaIn(ctx.orgId, lastMonth),
-      getExpenses(ctx.orgId, month),
-      getExpenses(ctx.orgId, lastMonth),
-      getLowStockCount(ctx.orgId),
-      getDailyRevenueSeries(ctx.orgId, 30),
-      getSalesByPaymentMethod(ctx.orgId, month),
-      prisma.mpesaTransaction.findMany({
-        where: { organizationId: ctx.orgId },
-        orderBy: { createdAt: "desc" },
-        take: 6,
-      }),
-      prisma.sale.findMany({
-        where: { organizationId: ctx.orgId },
-        orderBy: { createdAt: "desc" },
-        take: 6,
-        include: { customer: true },
-      }),
-      prisma.product.findMany({
-        where: { organizationId: ctx.orgId, active: true },
-        orderBy: { stock: "asc" },
-        take: 5,
-      }),
-      prisma.sale.count({ where: { organizationId: ctx.orgId, createdAt: { gte: today.from } } }),
-    ]);
+  const [
+    todayRevenue,
+    yesterdayRevenue,
+    monthRevenue,
+    lastMonthRevenue,
+    monthMpesaIn,
+    lastMonthMpesaIn,
+    monthExpenses,
+    lastMonthExpenses,
+    lowStock,
+    revenueSeries,
+    paymentMethods,
+    recentTxns,
+    recentSales,
+    lowStockProducts,
+    todaySalesCount,
+  ] = await Promise.all([
+    getRevenue(ctx.orgId, today),
+    getRevenue(ctx.orgId, yesterday),
+    getRevenue(ctx.orgId, month),
+    getRevenue(ctx.orgId, lastMonth),
+    getMpesaIn(ctx.orgId, month),
+    getMpesaIn(ctx.orgId, lastMonth),
+    getExpenses(ctx.orgId, month),
+    getExpenses(ctx.orgId, lastMonth),
+    getLowStockCount(ctx.orgId),
+    getDailyRevenueSeries(ctx.orgId, 30),
+    getSalesByPaymentMethod(ctx.orgId, month),
+    prisma.mpesaTransaction.findMany({
+      where: { organizationId: ctx.orgId },
+      orderBy: { createdAt: "desc" },
+      take: 6,
+    }),
+    prisma.sale.findMany({
+      where: { organizationId: ctx.orgId },
+      orderBy: { createdAt: "desc" },
+      take: 6,
+      include: { customer: true },
+    }),
+    prisma.product.findMany({
+      where: { organizationId: ctx.orgId, active: true },
+      orderBy: { stock: "asc" },
+      take: 5,
+    }),
+    prisma.sale.count({
+      where: { organizationId: ctx.orgId, createdAt: { gte: today.from } },
+    }),
+  ]);
 
   const monthProfit = monthRevenue - monthExpenses;
   const lastMonthProfit = lastMonthRevenue - lastMonthExpenses;
@@ -91,276 +101,229 @@ export default async function DashboardPage() {
 
   const kpis = [
     {
-      label: "Today's sales",
-      value: formatCompactKES(todayRevenue),
-      delta: pctChange(todayRevenue, yesterdayRevenue),
-      deltaLabel: "vs yesterday",
-      icon: ReceiptText,
-      sub: `${todaySalesCount} sale${todaySalesCount === 1 ? "" : "s"} today`,
-    },
-    {
-      label: "Revenue this month",
+      label: "Revenue",
       value: formatCompactKES(monthRevenue),
       delta: pctChange(monthRevenue, lastMonthRevenue),
-      deltaLabel: "vs last month",
+      sub: "vs last month",
       icon: TrendingUp,
+      accent: "default" as const,
     },
     {
-      label: "M-Pesa received",
+      label: "M-Pesa in",
       value: formatCompactKES(monthMpesaIn),
       delta: pctChange(monthMpesaIn, lastMonthMpesaIn),
-      deltaLabel: "vs last month",
+      sub: "vs last month",
       icon: Smartphone,
+      accent: "success" as const,
+    },
+    {
+      label: "Expenses",
+      value: formatCompactKES(monthExpenses),
+      delta: pctChange(monthExpenses, lastMonthExpenses),
+      sub: "vs last month",
+      icon: Wallet,
+      accent: "warning" as const,
+      invertDelta: true,
     },
     {
       label: "Net profit",
       value: formatCompactKES(monthProfit),
       delta: pctChange(monthProfit, lastMonthProfit),
-      deltaLabel: "vs last month",
-      icon: Wallet,
+      sub: "vs last month",
+      icon: Banknote,
+      accent: monthProfit >= 0 ? ("success" as const) : ("destructive" as const),
     },
   ];
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={`${greeting}, ${ctx.user.name.split(" ")[0]} 👋`}
-        description={new Date().toLocaleDateString("en-KE", {
+      <HeroPanel
+        greeting={greeting}
+        firstName={ctx.user.name.split(" ")[0]}
+        dateLabel={new Date().toLocaleDateString("en-KE", {
           weekday: "long",
           day: "numeric",
           month: "long",
-          year: "numeric",
         })}
-      >
-        <Button asChild>
-          <Link href="/sales">
-            <ReceiptText className="h-4 w-4" /> New sale
-          </Link>
-        </Button>
-      </PageHeader>
+        todayRevenue={todayRevenue}
+        todaySalesCount={todaySalesCount}
+        todayDelta={pctChange(todayRevenue, yesterdayRevenue)}
+        monthRevenue={monthRevenue}
+        monthProfit={monthProfit}
+      />
 
-      {/* Quick actions */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          { href: "/sales", label: "New sale", desc: "Ring up at the till", icon: ReceiptText, accent: "text-brand-400 bg-brand-500/15" },
-          { href: "/mpesa", label: "Send STK push", desc: "Request a payment", icon: Smartphone, accent: "text-chart-4 bg-chart-4/15" },
-          { href: "/expenses", label: "Record expense", desc: "Log a cost", icon: Wallet, accent: "text-chart-3 bg-chart-3/15" },
-          { href: "/inventory", label: "Add product", desc: "Stock your shelf", icon: Package, accent: "text-chart-2 bg-chart-2/15" },
-        ].map((a) => (
-          <Link
-            key={a.label}
-            href={a.href}
-            className="group flex items-center gap-3 rounded-lg border border-border bg-card p-3.5 transition-colors hover:border-brand-500/40 hover:bg-card/80"
-          >
-            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${a.accent}`}>
-              <a.icon className="h-5 w-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-medium">{a.label}</span>
-              <span className="block truncate text-xs text-muted-foreground">{a.desc}</span>
-            </span>
-          </Link>
-        ))}
-      </div>
+      {/* Low-stock alert — actionable, so it sits above the fold. */}
+      {lowStock > 0 && (
+        <Link
+          href="/inventory?filter=low"
+          className="flex items-center gap-3 rounded-xl border border-warning/25 bg-warning/5 px-4 py-3 transition-colors hover:bg-warning/10"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warning/15">
+            <AlertTriangle className="h-4 w-4 text-warning" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">
+              {lowStock} product{lowStock === 1 ? "" : "s"} running low
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              Restock before you run out — tap to review.
+            </p>
+          </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </Link>
+      )}
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((kpi) => (
-          <Card key={kpi.label}>
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between">
-                <p className="text-sm text-muted-foreground">{kpi.label}</p>
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500/15 text-brand-400">
-                  <kpi.icon className="h-4 w-4" />
-                </div>
-              </div>
-              <p className="mt-2 text-2xl font-bold tracking-tight">{kpi.value}</p>
-              <div className="mt-2 flex items-center gap-2">
-                {kpi.delta !== null ? (
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium",
-                      kpi.delta >= 0
-                        ? "bg-success/10 text-success"
-                        : "bg-destructive/10 text-destructive",
-                    )}
-                  >
-                    {kpi.delta >= 0 ? (
-                      <ArrowUpRight className="h-3 w-3" />
-                    ) : (
-                      <ArrowDownRight className="h-3 w-3" />
-                    )}
-                    {Math.abs(kpi.delta).toFixed(0)}%
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">new</span>
-                )}
-                <span className="text-xs text-muted-foreground">{kpi.deltaLabel}</span>
-              </div>
-              {"sub" in kpi && kpi.sub ? (
-                <p className="mt-1 text-xs text-muted-foreground">{kpi.sub}</p>
-              ) : null}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* This month at a glance */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold tracking-tight">This month</h2>
+          <Badge variant="muted" size="sm">
+            {new Date().toLocaleDateString("en-KE", { month: "long", year: "numeric" })}
+          </Badge>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {kpis.map((kpi) => (
+            <StatCard key={kpi.label} {...kpi} />
+          ))}
+        </div>
+      </section>
 
       {/* Charts */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Revenue — last 30 days</CardTitle>
-            <Badge variant="outline">{formatKES(monthRevenue)} this month</Badge>
-          </CardHeader>
-          <CardContent>
+      <div className="grid gap-4 lg:grid-cols-5">
+        <Card className="lg:col-span-3">
+          <CardToolbar>
+            <div>
+              <h3 className="text-sm font-semibold tracking-tight">Revenue trend</h3>
+              <p className="text-xs text-muted-foreground">Last 30 days</p>
+            </div>
+            <Badge variant="outline" size="sm">
+              {formatKES(monthRevenue)} MTD
+            </Badge>
+          </CardToolbar>
+          <CardContent className="pt-4">
             <RevenueAreaChart data={revenueSeries} />
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Sales by payment method</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Card className="lg:col-span-2">
+          <CardToolbar>
+            <div>
+              <h3 className="text-sm font-semibold tracking-tight">Payment methods</h3>
+              <p className="text-xs text-muted-foreground">How customers pay</p>
+            </div>
+          </CardToolbar>
+          <CardContent className="pt-4">
             <PaymentMethodDonut data={paymentMethods} />
           </CardContent>
         </Card>
       </div>
 
-      {/* Activity panels */}
+      {/* Activity */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Recent M-Pesa transactions</CardTitle>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/mpesa">
-                View all <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {recentTxns.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No M-Pesa transactions yet.
-              </p>
-            )}
-            {recentTxns.map((txn) => (
-              <div
-                key={txn.id}
-                className="flex items-center justify-between rounded-md px-2 py-2 transition-colors hover:bg-muted/40"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/15">
-                    <Smartphone className="h-3.5 w-3.5 text-brand-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{txn.phone}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatRelative(txn.createdAt)} · {txn.receiptNo ?? txn.reference ?? "STK push"}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <MpesaStatusBadge status={txn.status} />
-                  <span
-                    className={cn(
-                      "text-sm font-semibold tabular-nums",
-                      txn.direction === "INCOMING" ? "text-success" : "text-destructive",
-                    )}
-                  >
-                    {txn.direction === "INCOMING" ? "+" : "−"}
-                    {formatKES(txn.amount)}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+        <ActivityPanel
+          title="Recent M-Pesa"
+          href="/mpesa"
+          isEmpty={recentTxns.length === 0}
+          emptyText="No M-Pesa transactions yet."
+          emptyIcon={<Smartphone className="h-5 w-5" />}
+        >
+          {recentTxns.map((txn) => (
+            <ActivityRow
+              key={txn.id}
+              icon={<Smartphone className="h-4 w-4 text-brand-500" />}
+              title={formatPhone(txn.phone)}
+              meta={
+                <>
+                  {formatRelative(txn.createdAt)}
+                  {(txn.receiptNo ?? txn.reference) && (
+                    <> · {txn.receiptNo ?? txn.reference}</>
+                  )}
+                </>
+              }
+              value={
+                <>
+                  {txn.direction === "INCOMING" ? "+" : "−"}
+                  {formatKES(txn.amount)}
+                </>
+              }
+              valueClassName={
+                txn.direction === "INCOMING" ? "text-success" : "text-destructive"
+              }
+              badge={<MpesaStatusBadge status={txn.status} />}
+            />
+          ))}
+        </ActivityPanel>
 
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Recent sales</CardTitle>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/sales">
-                View all <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {recentSales.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">
-                No sales yet — record your first one!
-              </p>
-            )}
-            {recentSales.map((sale) => (
-              <div
-                key={sale.id}
-                className="flex items-center justify-between rounded-md px-2 py-2 transition-colors hover:bg-muted/40"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-                    <Banknote className="h-3.5 w-3.5 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{sale.customer?.name ?? "Walk-in"}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {sale.receiptNo} · {formatRelative(sale.createdAt)}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <PaymentMethodBadge method={sale.paymentMethod} />
-                  <span className="text-sm font-semibold tabular-nums">
-                    {formatKES(sale.total)}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+        <ActivityPanel
+          title="Recent sales"
+          href="/sales"
+          isEmpty={recentSales.length === 0}
+          emptyText="No sales yet — record your first one."
+          emptyIcon={<ReceiptText className="h-5 w-5" />}
+        >
+          {recentSales.map((sale) => (
+            <ActivityRow
+              key={sale.id}
+              icon={<ReceiptText className="h-4 w-4 text-muted-foreground" />}
+              title={sale.customer?.name ?? "Walk-in customer"}
+              meta={
+                <>
+                  {sale.receiptNo} · {formatRelative(sale.createdAt)}
+                </>
+              }
+              value={formatKES(sale.total)}
+              badge={<PaymentMethodBadge method={sale.paymentMethod} />}
+            />
+          ))}
+        </ActivityPanel>
 
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Low stock alerts</CardTitle>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/inventory">
-                Inventory <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {lowStock === 0 && (
-              <p className="flex items-center gap-2 py-8 text-center text-sm text-muted-foreground">
-                <Package className="h-4 w-4" /> All products are well stocked. 🎉
-              </p>
-            )}
-            {lowStockProducts.map((product) => (
-              <div
+        <ActivityPanel
+          title="Low stock"
+          href="/inventory"
+          linkLabel="Manage"
+          isEmpty={lowStockProducts.length === 0}
+          emptyText="Everything is well stocked."
+          emptyIcon={<Package className="h-5 w-5" />}
+        >
+          {lowStockProducts.map((product) => {
+            const critical = product.stock <= 0;
+            const low = product.stock <= product.lowStockThreshold;
+            return (
+              <ActivityRow
                 key={product.id}
-                className="flex items-center justify-between rounded-md px-2 py-2 transition-colors hover:bg-muted/40"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-destructive/10">
-                    <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">{product.name}</p>
-                    <p className="text-xs text-muted-foreground">{product.category}</p>
-                  </div>
-                </div>
-                <Badge variant={product.stock === 0 ? "destructive" : "warning"}>
-                  {product.stock} {product.unit} left
-                </Badge>
-              </div>
-            ))}
-            {lowStock > lowStockProducts.length && (
-              <p className="px-2 pt-2 text-xs text-muted-foreground">
-                +{lowStock - lowStockProducts.length} more low-stock item
-                {lowStock - lowStockProducts.length === 1 ? "" : "s"}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+                icon={
+                  <Package
+                    className={cn(
+                      "h-4 w-4",
+                      critical
+                        ? "text-destructive"
+                        : low
+                          ? "text-warning"
+                          : "text-muted-foreground",
+                    )}
+                  />
+                }
+                title={product.name}
+                meta={<>Reorder at {product.lowStockThreshold} {product.unit}</>}
+                value={`${product.stock} ${product.unit}`}
+                valueClassName={
+                  critical ? "text-destructive" : low ? "text-warning" : undefined
+                }
+                badge={
+                  critical ? (
+                    <Badge variant="destructive" size="sm">
+                      Out
+                    </Badge>
+                  ) : low ? (
+                    <Badge variant="warning" size="sm">
+                      Low
+                    </Badge>
+                  ) : undefined
+                }
+              />
+            );
+          })}
+        </ActivityPanel>
       </div>
     </div>
   );

@@ -53,6 +53,11 @@ enum MpesaStatus {
   TIMEOUT
 }
 
+enum MpesaEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
 enum ExpenseCategory {
   INVENTORY
   RENT
@@ -85,6 +90,7 @@ model Organization {
   sales            Sale[]
   expenses         Expense[]
   mpesaTransactions MpesaTransaction[]
+  mpesaConfig      MpesaConfig?
 
   @@index([tier])
 }
@@ -215,11 +221,48 @@ model MpesaTransaction {
   createdAt      DateTime       @default(now())
   completedAt    DateTime?
 
+  // --- Daraja STK Push correlation / callback results -----------------------
+  // Returned by Daraja when the STK push is accepted. `checkoutRequestId` is
+  // the key the Safaricom callback uses to identify this transaction.
+  merchantRequestId String?
+  checkoutRequestId String? @unique
+  // Populated by the Daraja callback (`stkCallback.ResultCode` / `ResultDesc`).
+  resultCode        Int?
+  resultDesc        String?
+
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, createdAt])
   @@index([organizationId, status])
   @@index([phone])
+  @@index([checkoutRequestId])
+}
+
+/// Per-organization Safaricom Daraja credentials.
+///
+/// SECURITY: `consumerSecret` and `passkey` are secrets. They are only ever
+/// read inside server-only modules (`src/lib/mpesa/*`, server actions, route
+/// handlers) and must never be selected into a payload that reaches the
+/// browser. Use `toSafeMpesaConfig()` in `src/lib/mpesa/config.ts` for any
+/// value crossing the server/client boundary.
+model MpesaConfig {
+  id             String           @id @default(cuid())
+  organizationId String           @unique
+  environment    MpesaEnvironment @default(SANDBOX)
+  shortcode      String
+  consumerKey    String
+  consumerSecret String
+  passkey        String
+  enabled        Boolean          @default(false)
+  /// Optional override for the publicly reachable callback base URL. When
+  /// blank the app falls back to MPESA_CALLBACK_BASE_URL / NEXT_PUBLIC_APP_URL.
+  callbackUrl    String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
 
 // ---------------------------------------------------------------------------

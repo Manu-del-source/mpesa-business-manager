@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { ChevronRight, Smartphone } from "lucide-react";
 import { requireAppContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/layout/page-header";
@@ -7,13 +9,15 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { OrgSettingsForm } from "@/components/settings/org-settings-form";
 import { DangerZone } from "@/components/settings/danger-zone";
+import { MpesaStateBadge } from "@/components/mpesa/mpesa-state";
+import { getSafeMpesaConfig } from "@/lib/mpesa/config";
 
 export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const ctx = await requireAppContext();
 
-  const [members, counts] = await Promise.all([
+  const [members, counts, mpesaConfig] = await Promise.all([
     prisma.organizationMember.findMany({
       where: { organizationId: ctx.orgId },
       orderBy: { createdAt: "asc" },
@@ -23,6 +27,7 @@ export default async function SettingsPage() {
       prisma.sale.count({ where: { organizationId: ctx.orgId } }),
       prisma.customer.count({ where: { organizationId: ctx.orgId } }),
     ]),
+    getSafeMpesaConfig(ctx.orgId),
   ]);
 
   return (
@@ -42,6 +47,37 @@ export default async function SettingsPage() {
             businessType={ctx.org.businessType}
             tier={ctx.org.tier}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">M-Pesa payments</CardTitle>
+          <CardDescription>
+            Connect Safaricom Daraja to accept real STK push payments.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link
+            href="/settings/mpesa"
+            className="flex items-center justify-between rounded-lg border border-border p-4 transition-colors hover:bg-accent/50"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-500/15">
+                <Smartphone className="h-4 w-4 text-brand-400" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Daraja configuration</p>
+                <p className="text-xs text-muted-foreground">
+                  Shortcode, consumer key, secret and passkey
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <MpesaStateBadge config={mpesaConfig} />
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </Link>
         </CardContent>
       </Card>
 

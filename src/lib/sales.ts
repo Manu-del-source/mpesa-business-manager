@@ -107,10 +107,17 @@ export async function createSale(orgId: string, input: CreateSaleInput) {
     if (!push.ok) {
       // Payment could not be initiated — leave sale pending so the user can
       // retry, but surface the error immediately.
-      return { sale, mpesaError: push.error, transactionId: null };
+      return { sale, mpesaError: push.error, transactionId: null, mpesaMode: null };
     }
 
-    return { sale, mpesaError: null, transactionId: push.transactionId };
+    return {
+      sale,
+      mpesaError: null,
+      transactionId: push.transactionId,
+      // "daraja" = a real STK push is in flight and only the Safaricom
+      // callback may complete this sale.
+      mpesaMode: push.mode,
+    };
   }
 
   const sale = await prisma.$transaction(async (tx) => {
@@ -131,12 +138,17 @@ export async function createSale(orgId: string, input: CreateSaleInput) {
     return created;
   });
 
-  return { sale, mpesaError: null, transactionId: null };
+  return { sale, mpesaError: null, transactionId: null, mpesaMode: null };
 }
 
 /**
- * Complete a PENDING M-Pesa sale once payment succeeds (mock callback path).
- * Marks the M-Pesa transaction SUCCESS and decrements stock atomically.
+ * Complete a PENDING M-Pesa sale once payment succeeds.
+ *
+ * SIMULATED PATH ONLY. For live Daraja transactions the equivalent work is
+ * done by the callback (`settleLinkedSale` in `src/lib/mpesa/callback.ts`),
+ * which is the only trustworthy confirmation of payment. This function
+ * therefore refuses to touch a sale whose M-Pesa transaction carries a real
+ * Daraja checkoutRequestId.
  */
 export async function completeMpesaSale(orgId: string, saleId: string) {
   const sale = await prisma.sale.findFirst({
@@ -149,6 +161,9 @@ export async function completeMpesaSale(orgId: string, saleId: string) {
     where: { organizationId: orgId, reference: sale.receiptNo, status: "PENDING" },
   });
   if (!txn) return null;
+
+  // Live payment in flight — only Safaricom's callback may complete it.
+  if (txn.checkoutRequestId) return null;
 
   const completed = await prisma.$transaction(async (tx) => {
     const done = await completeStkPush(txn.id, orgId);

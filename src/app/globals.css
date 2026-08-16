@@ -1,84 +1,376 @@
 @import "tailwindcss";
 
+/* ===========================================================================
+   Design tokens — refined dark fintech, with a full light counterpart.
+   
+   Both themes are defined in OKLCH so lightness steps stay perceptually even.
+   `.dark` is applied to <html> by next-themes; `:root` is the light theme.
+   Surfaces are layered (bg < surface < card < elevated) so panels read as
+   stacked planes instead of flat boxes.
+   =========================================================================== */
+
 :root {
-  --background: oklch(0.135 0.005 285.823);
-  --foreground: oklch(0.98 0.002 285.8);
-  --card: oklch(0.17 0.006 285.823);
-  --card-foreground: oklch(0.98 0.002 285.8);
-  --popover: oklch(0.185 0.006 285.823);
-  --popover-foreground: oklch(0.98 0.002 285.8);
-  --primary: oklch(0.74 0.17 148.5);
-  --primary-foreground: oklch(0.16 0.04 148.5);
-  --secondary: oklch(0.26 0.006 286.03);
-  --secondary-foreground: oklch(0.98 0.002 285.8);
-  --muted: oklch(0.24 0.005 286.03);
-  --muted-foreground: oklch(0.7 0.012 286.07);
-  --accent: oklch(0.28 0.006 286.03);
-  --accent-foreground: oklch(0.98 0.002 285.8);
-  --destructive: oklch(0.6 0.21 22.5);
-  --destructive-foreground: oklch(0.98 0.002 285.8);
-  --success: oklch(0.7 0.17 155);
-  --warning: oklch(0.8 0.16 85);
-  --border: oklch(0.27 0.006 286.03);
-  --input: oklch(0.27 0.006 286.03);
-  --ring: oklch(0.74 0.17 148.5);
+  /* Base surfaces — warm-neutral greys, not pure white, to cut glare. */
+  --background: oklch(0.985 0.002 285);
+  --surface: oklch(0.972 0.003 285);
+  --foreground: oklch(0.21 0.01 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.01 285);
+  --elevated: oklch(1 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.01 285);
+
+  --primary: oklch(0.62 0.16 149);
+  --primary-foreground: oklch(0.99 0.005 150);
+  --secondary: oklch(0.955 0.004 285);
+  --secondary-foreground: oklch(0.28 0.01 285);
+  --muted: oklch(0.96 0.003 285);
+  --muted-foreground: oklch(0.52 0.012 285);
+  --accent: oklch(0.945 0.005 285);
+  --accent-foreground: oklch(0.24 0.01 285);
+
+  --destructive: oklch(0.58 0.21 25);
+  --destructive-foreground: oklch(0.99 0.005 25);
+  --success: oklch(0.58 0.15 155);
+  --success-foreground: oklch(0.99 0.005 155);
+  --warning: oklch(0.68 0.15 70);
+  --warning-foreground: oklch(0.99 0.005 70);
+  --info: oklch(0.58 0.16 250);
+
+  --border: oklch(0.915 0.004 285);
+  --border-strong: oklch(0.86 0.006 285);
+  --input: oklch(0.9 0.005 285);
+  --ring: oklch(0.62 0.16 149);
+
   --radius: 0.75rem;
-  --color-brand-50: oklch(0.97 0.03 150);
-  --color-brand-100: oklch(0.93 0.06 150);
-  --color-brand-200: oklch(0.88 0.09 150);
-  --color-brand-300: oklch(0.82 0.12 149);
-  --color-brand-400: oklch(0.77 0.15 149);
-  --color-brand-500: oklch(0.72 0.17 148);
-  --color-brand-600: oklch(0.64 0.16 148);
-  --color-brand-700: oklch(0.54 0.14 148);
-  --color-brand-800: oklch(0.44 0.11 148);
-  --color-brand-900: oklch(0.35 0.09 148);
-  --color-brand-950: oklch(0.25 0.06 148);
+
+  /* Brand ramp — M-Pesa green. */
+  --brand-50: oklch(0.97 0.025 150);
+  --brand-100: oklch(0.94 0.05 150);
+  --brand-200: oklch(0.89 0.08 150);
+  --brand-300: oklch(0.83 0.11 149);
+  --brand-400: oklch(0.75 0.14 149);
+  --brand-500: oklch(0.68 0.16 148);
+  --brand-600: oklch(0.60 0.155 148);
+  --brand-700: oklch(0.50 0.13 148);
+  --brand-800: oklch(0.40 0.10 148);
+  --brand-900: oklch(0.32 0.08 148);
+  --brand-950: oklch(0.22 0.05 148);
+
+  --chart-1: oklch(0.62 0.16 148);
+  --chart-2: oklch(0.68 0.15 55);
+  --chart-3: oklch(0.60 0.19 27);
+  --chart-4: oklch(0.58 0.17 260);
+  --chart-5: oklch(0.62 0.15 310);
+
+  /* Elevation — soft, tight, layered. Light mode uses real shadows. */
+  --shadow-xs: 0 1px 2px 0 oklch(0.2 0.01 285 / 0.05);
+  --shadow-sm: 0 1px 3px 0 oklch(0.2 0.01 285 / 0.07), 0 1px 2px -1px oklch(0.2 0.01 285 / 0.06);
+  --shadow-md: 0 4px 12px -2px oklch(0.2 0.01 285 / 0.08), 0 2px 4px -2px oklch(0.2 0.01 285 / 0.05);
+  --shadow-lg: 0 12px 28px -6px oklch(0.2 0.01 285 / 0.12), 0 4px 8px -4px oklch(0.2 0.01 285 / 0.06);
+  --shadow-glow: 0 0 0 1px oklch(0.62 0.16 149 / 0.18), 0 4px 16px -4px oklch(0.62 0.16 149 / 0.25);
+}
+
+.dark {
+  /* Layered near-blacks. Background is the darkest plane; cards lift off it. */
+  --background: oklch(0.155 0.004 285);
+  --surface: oklch(0.185 0.005 285);
+  --foreground: oklch(0.97 0.002 285);
+  --card: oklch(0.196 0.005 285);
+  --card-foreground: oklch(0.97 0.002 285);
+  --elevated: oklch(0.225 0.006 285);
+  --popover: oklch(0.215 0.006 285);
+  --popover-foreground: oklch(0.97 0.002 285);
+
+  --primary: oklch(0.74 0.17 148);
+  --primary-foreground: oklch(0.16 0.04 148);
+  --secondary: oklch(0.265 0.006 286);
+  --secondary-foreground: oklch(0.97 0.002 285);
+  --muted: oklch(0.245 0.005 286);
+  --muted-foreground: oklch(0.68 0.012 286);
+  --accent: oklch(0.285 0.007 286);
+  --accent-foreground: oklch(0.98 0.002 285);
+
+  --destructive: oklch(0.63 0.2 24);
+  --destructive-foreground: oklch(0.99 0.005 25);
+  --success: oklch(0.72 0.17 155);
+  --success-foreground: oklch(0.15 0.03 155);
+  --warning: oklch(0.81 0.16 82);
+  --warning-foreground: oklch(0.18 0.04 82);
+  --info: oklch(0.68 0.16 250);
+
+  --border: oklch(0.272 0.006 286);
+  --border-strong: oklch(0.34 0.008 286);
+  --input: oklch(0.30 0.007 286);
+  --ring: oklch(0.74 0.17 148);
+
+  --brand-50: oklch(0.97 0.03 150);
+  --brand-100: oklch(0.93 0.06 150);
+  --brand-200: oklch(0.88 0.09 150);
+  --brand-300: oklch(0.82 0.12 149);
+  --brand-400: oklch(0.77 0.15 149);
+  --brand-500: oklch(0.72 0.17 148);
+  --brand-600: oklch(0.64 0.16 148);
+  --brand-700: oklch(0.54 0.14 148);
+  --brand-800: oklch(0.44 0.11 148);
+  --brand-900: oklch(0.35 0.09 148);
+  --brand-950: oklch(0.25 0.06 148);
+
   --chart-1: oklch(0.72 0.17 148);
   --chart-2: oklch(0.77 0.15 55);
-  --chart-3: oklch(0.62 0.2 27);
+  --chart-3: oklch(0.65 0.2 27);
   --chart-4: oklch(0.66 0.19 260);
   --chart-5: oklch(0.7 0.15 310);
+
+  /* In dark mode shadows read as depth halos rather than drop shadows. */
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.4), 0 1px 2px -1px oklch(0 0 0 / 0.3);
+  --shadow-md: 0 4px 14px -2px oklch(0 0 0 / 0.5), 0 2px 6px -2px oklch(0 0 0 / 0.35);
+  --shadow-lg: 0 16px 36px -8px oklch(0 0 0 / 0.6), 0 6px 12px -6px oklch(0 0 0 / 0.4);
+  --shadow-glow: 0 0 0 1px oklch(0.74 0.17 148 / 0.25), 0 6px 22px -6px oklch(0.74 0.17 148 / 0.35);
 }
 
 @theme inline {
-  --color-background: var(--background); --color-foreground: var(--foreground);
-  --color-card: var(--card); --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive); --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success); --color-warning: var(--warning);
-  --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
-  --color-brand-50: var(--color-brand-50); --color-brand-100: var(--color-brand-100);
-  --color-brand-200: var(--color-brand-200); --color-brand-300: var(--color-brand-300);
-  --color-brand-400: var(--color-brand-400); --color-brand-500: var(--color-brand-500);
-  --color-brand-600: var(--color-brand-600); --color-brand-700: var(--color-brand-700);
-  --color-brand-800: var(--color-brand-800); --color-brand-900: var(--color-brand-900);
-  --color-brand-950: var(--color-brand-950);
-  --color-chart-1: var(--chart-1); --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3); --color-chart-4: var(--chart-4); --color-chart-5: var(--chart-5);
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-elevated: var(--elevated);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
+  --color-brand-950: var(--brand-950);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
-  --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-glow: var(--shadow-glow);
 }
 
-* { border-color: var(--border); }
-html { scroll-behavior: smooth; }
-body {
-  background-color: var(--background); color: var(--foreground);
-  font-family: var(--font-sans); -webkit-font-smoothing: antialiased;
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+
+* {
+  border-color: var(--border);
 }
-::selection { background-color: color-mix(in oklab, var(--color-brand-500) 35%, transparent); color: var(--foreground); }
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Slightly tighter tracking reads better for dense financial UI. */
+  letter-spacing: -0.011em;
+}
+
+/* Theme changes shouldn't flash or animate every element. */
+.theme-transition,
+.theme-transition * {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+}
+
+::selection {
+  background-color: color-mix(in oklab, var(--brand-500) 30%, transparent);
+  color: var(--foreground);
+}
+
+/* Tabular figures everywhere money appears — keeps columns aligned. */
+.tabular,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Utilities
+   -------------------------------------------------------------------------- */
+
+.thin-scroll::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 9999px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Dotted grid used on marketing/auth backdrops. */
 .hero-grid {
-  background-image: radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.07) 1px, transparent 0);
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in oklab, var(--foreground) 8%, transparent) 1px,
+    transparent 0
+  );
   background-size: 32px 32px;
 }
-input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
-input[type="number"]::-webkit-outer-spin-button,
-input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.thin-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
-.thin-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 9999px; }
+
+/* Subtle top highlight — makes a card feel lit from above. */
+.card-sheen {
+  position: relative;
+}
+.card-sheen::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--foreground) 10%, transparent),
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* Ambient brand glow behind hero/priority elements. */
+.brand-glow {
+  position: relative;
+}
+.brand-glow::after {
+  content: "";
+  position: absolute;
+  inset: -40% -20% auto -20%;
+  height: 220px;
+  background: radial-gradient(
+    ellipse at top,
+    color-mix(in oklab, var(--brand-500) 18%, transparent),
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Shimmer for loading skeletons. */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--foreground) 6%, transparent),
+    transparent
+  );
+  animation: shimmer 1.6s infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-fade-up {
+  animation: fade-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Slow pulse for "waiting for payment" states. */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.animate-pulse-ring {
+  animation: pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

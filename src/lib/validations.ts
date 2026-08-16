@@ -126,6 +126,52 @@ export const stkPushSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// M-Pesa Daraja configuration (per organization)
+// ---------------------------------------------------------------------------
+
+export const mpesaEnvironmentSchema = z.enum(["sandbox", "production"]);
+
+/**
+ * Sentinel sent by the settings form when the admin leaves the consumer key
+ * untouched. The server substitutes the stored value, so the real key never
+ * has to round-trip through the browser.
+ */
+export const MPESA_KEEP_EXISTING = "__KEEP_EXISTING__";
+
+/**
+ * Secrets are optional on update: a blank consumerSecret/passkey means
+ * "keep the stored value". The server enforces that they are present the
+ * first time a configuration is created.
+ */
+export const mpesaConfigSchema = z.object({
+  environment: mpesaEnvironmentSchema,
+  shortcode: z
+    .string()
+    .trim()
+    .regex(/^\d{5,9}$/, "Shortcode must be 5–9 digits, e.g. 174379"),
+  consumerKey: z.string().trim().min(10, "Enter your Daraja consumer key"),
+  consumerSecret: z
+    .string()
+    .trim()
+    .min(10, "Consumer secret looks too short")
+    .optional()
+    .or(z.literal("")),
+  passkey: z
+    .string()
+    .trim()
+    .min(10, "Passkey looks too short")
+    .optional()
+    .or(z.literal("")),
+  enabled: z.coerce.boolean(),
+  callbackUrl: z
+    .string()
+    .trim()
+    .url("Enter a valid https:// callback URL")
+    .optional()
+    .or(z.literal("")),
+});
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
