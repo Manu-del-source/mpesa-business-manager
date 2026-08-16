@@ -146,3 +146,46 @@ CREATE INDEX "MpesaTransaction_organizationId_status_idx"    ON "MpesaTransactio
 CREATE INDEX "MpesaTransaction_phone_idx"            ON "MpesaTransaction"("phone");
 CREATE INDEX "Expense_organizationId_expenseDate_idx" ON "Expense"("organizationId", "expenseDate");
 CREATE INDEX "Expense_organizationId_category_idx"   ON "Expense"("organizationId", "category");
+
+-- ---------------------------------------------------------------------------
+-- M-Pesa Daraja integration (additive — safe to run on an existing database)
+-- ---------------------------------------------------------------------------
+-- Mirrors the MpesaConfig model and the Daraja callback columns added to
+-- MpesaTransaction. Everything below is IF NOT EXISTS / idempotent so it can
+-- be applied to a populated database without touching existing rows.
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'MpesaEnvironment') THEN
+    CREATE TYPE "MpesaEnvironment" AS ENUM ('SANDBOX', 'PRODUCTION');
+  END IF;
+END
+$$;
+
+ALTER TABLE "MpesaTransaction"
+  ADD COLUMN IF NOT EXISTS "merchantRequestId" TEXT,
+  ADD COLUMN IF NOT EXISTS "checkoutRequestId" TEXT,
+  ADD COLUMN IF NOT EXISTS "resultCode"        INTEGER,
+  ADD COLUMN IF NOT EXISTS "resultDesc"        TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "MpesaTransaction_checkoutRequestId_key"
+  ON "MpesaTransaction"("checkoutRequestId");
+CREATE INDEX IF NOT EXISTS "MpesaTransaction_checkoutRequestId_idx"
+  ON "MpesaTransaction"("checkoutRequestId");
+
+CREATE TABLE IF NOT EXISTS "MpesaConfig" (
+  "id"             TEXT PRIMARY KEY,
+  "organizationId" TEXT NOT NULL UNIQUE REFERENCES "Organization"("id") ON DELETE CASCADE,
+  "environment"    "MpesaEnvironment" NOT NULL DEFAULT 'SANDBOX',
+  "shortcode"      TEXT NOT NULL,
+  "consumerKey"    TEXT NOT NULL,
+  "consumerSecret" TEXT NOT NULL,
+  "passkey"        TEXT NOT NULL,
+  "enabled"        BOOLEAN NOT NULL DEFAULT false,
+  "callbackUrl"    TEXT,
+  "createdAt"      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS "MpesaConfig_organizationId_idx"
+  ON "MpesaConfig"("organizationId");

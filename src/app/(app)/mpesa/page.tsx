@@ -26,7 +26,10 @@ import {
 import { MpesaStatusBadge } from "@/components/shared/status";
 import { StkPushDialog } from "@/components/mpesa/stk-push-dialog";
 import { SimulateButton } from "@/components/mpesa/simulate-button";
-import { ArrowDownLeft, ArrowUpRight, Smartphone } from "lucide-react";
+import { MpesaStateBanner, MpesaStateBadge } from "@/components/mpesa/mpesa-state";
+import { getSafeMpesaConfig } from "@/lib/mpesa/config";
+import { ArrowDownLeft, ArrowUpRight, Settings2, Smartphone } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "M-Pesa" };
@@ -36,6 +39,8 @@ type SearchParams = Promise<{ q?: string; direction?: string; status?: string }>
 export default async function MpesaPage({ searchParams }: { searchParams: SearchParams }) {
   const ctx = await requireAppContext();
   const { q, direction, status } = await searchParams;
+  // Masked config only — Daraja secrets never reach this render tree.
+  const mpesaConfig = await getSafeMpesaConfig(ctx.orgId);
 
   const where: Record<string, unknown> = { organizationId: ctx.orgId };
   if (direction && direction !== "ALL") where.direction = direction;
@@ -97,8 +102,19 @@ export default async function MpesaPage({ searchParams }: { searchParams: Search
         title="M-Pesa"
         description="Every shilling in and out of your M-Pesa account, reconciled."
       >
-        <StkPushDialog />
+        <div className="flex items-center gap-2">
+          <MpesaStateBadge config={mpesaConfig} />
+          <Link
+            href="/settings/mpesa"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Settings2 className="h-4 w-4" /> Configure
+          </Link>
+          <StkPushDialog config={mpesaConfig} />
+        </div>
       </PageHeader>
+
+      <MpesaStateBanner config={mpesaConfig} showSettingsLink={!mpesaConfig.configured} />
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -249,11 +265,23 @@ export default async function MpesaPage({ searchParams }: { searchParams: Search
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <MpesaStatusBadge status={txn.status} />
-                      {txn.status === "PENDING" && <SimulateButton transactionId={txn.id} />}
+                      {txn.status === "PENDING" && (
+                        <SimulateButton
+                          transactionId={txn.id}
+                          isLive={Boolean(txn.checkoutRequestId)}
+                        />
+                      )}
                     </div>
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {txn.receiptNo ?? txn.reference ?? "—"}
+                  <TableCell className="max-w-[220px] text-xs text-muted-foreground">
+                    <span className="font-mono">
+                      {txn.receiptNo ?? txn.reference ?? "—"}
+                    </span>
+                    {txn.status !== "SUCCESS" && txn.resultDesc && (
+                      <span className="mt-0.5 block truncate" title={txn.resultDesc}>
+                        {txn.resultDesc}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">
                     {formatDateTime(txn.createdAt)}
@@ -296,9 +324,15 @@ export default async function MpesaPage({ searchParams }: { searchParams: Search
                     {txn.receiptNo ?? txn.reference}
                   </p>
                 )}
+                {txn.status !== "SUCCESS" && txn.resultDesc && (
+                  <p className="mt-1 text-xs text-muted-foreground">{txn.resultDesc}</p>
+                )}
                 {txn.status === "PENDING" && (
                   <div className="mt-2">
-                    <SimulateButton transactionId={txn.id} />
+                    <SimulateButton
+                      transactionId={txn.id}
+                      isLive={Boolean(txn.checkoutRequestId)}
+                    />
                   </div>
                 )}
               </CardContent>

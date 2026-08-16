@@ -17,6 +17,8 @@ export type CreateSaleActionResult = ActionResult & {
     status: string;
     transactionId: string | null;
     mpesaError: string | null;
+    /** "daraja" when a real STK push is in flight, "demo" when simulated. */
+    mpesaMode: "demo" | "daraja" | null;
   };
 };
 
@@ -40,6 +42,7 @@ export async function createSaleAction(input: unknown): Promise<CreateSaleAction
         status: result.sale.status,
         transactionId: result.transactionId,
         mpesaError: result.mpesaError,
+        mpesaMode: result.mpesaMode,
       },
     };
   } catch (err) {
