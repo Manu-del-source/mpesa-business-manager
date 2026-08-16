@@ -2,13 +2,21 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { LogOut, Menu, Zap } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { Menu, Sparkles } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { SidebarNav } from "@/components/layout/app-sidebar";
-import { signOutAction } from "@/app/(auth)/actions";
+import { SidebarFooter, SidebarNav, NAV_ITEMS } from "@/components/layout/app-sidebar";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 
+/**
+ * Top bar for every authenticated page.
+ *
+ * Unlike the previous mobile-only header this is always visible: on desktop it
+ * carries page context and the theme control, on mobile it also holds the
+ * navigation drawer trigger.
+ */
 export function AppTopbar({
   orgName,
   tier,
@@ -23,74 +31,90 @@ export function AppTopbar({
   isDemo: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+
+  const current =
+    NAV_ITEMS.find(
+      (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+    ) ?? null;
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur md:hidden">
-      <div className="flex items-center gap-2">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-xl sm:px-6">
+      <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Open menu"
+          className="-ml-1 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+          aria-label="Open navigation"
         >
           <Menu className="h-5 w-5" />
         </button>
-        <Link href="/dashboard">
+
+        <Link href="/dashboard" className="md:hidden">
           <Logo compact />
         </Link>
+
+        {/* Desktop: show where you are. */}
+        <div className="hidden min-w-0 items-center gap-2 md:flex">
+          <span className="truncate text-sm font-medium text-muted-foreground">
+            {orgName}
+          </span>
+          {current && (
+            <>
+              <span className="text-muted-foreground/40">/</span>
+              <span className="truncate text-sm font-semibold text-foreground">
+                {current.label}
+              </span>
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         {isDemo && (
-          <Badge variant="warning">
-            <Zap className="h-3 w-3" /> Demo
+          <Badge variant="warning" className="hidden sm:inline-flex" dot>
+            <span className="hidden md:inline">Demo mode</span>
+            <span className="md:hidden">Demo</span>
           </Badge>
         )}
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/20 text-xs font-bold text-brand-400">
+        <ThemeToggle className="hidden sm:inline-flex" />
+        <div
+          className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 text-xs font-bold text-white md:hidden"
+          title={userName}
+        >
           {userName.slice(0, 1).toUpperCase()}
         </div>
       </div>
 
+      {/* Mobile navigation drawer */}
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="left" className="flex w-72 flex-col p-0">
+        <SheetContent side="left" className="flex w-[280px] flex-col gap-0 bg-surface p-0">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <div className="flex h-16 items-center border-b border-border px-5">
+          <div className="flex h-16 shrink-0 items-center border-b border-border px-4">
             <Logo />
           </div>
           <SidebarNav onNavigate={() => setOpen(false)} />
-          <div className="border-t border-border p-4">
-            <div className="mb-3 flex items-center justify-between px-1">
-              <p className="truncate text-sm font-semibold">{orgName}</p>
-              <Badge variant={tier === "PRO" ? "success" : "secondary"}>
-                {tier === "PRO" ? (
-                  <span className="flex items-center gap-1">
-                    <Zap className="h-3 w-3" /> PRO
-                  </span>
-                ) : (
-                  "FREE"
-                )}
-              </Badge>
-            </div>
-            <div className="flex items-center gap-2 rounded-md border border-border bg-background/50 px-2 py-2">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-500/20 text-xs font-bold text-brand-400">
-                {userName.slice(0, 1).toUpperCase()}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium">{userName}</p>
-                <p className="truncate text-[11px] text-muted-foreground">{userEmail}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void signOutAction()}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label="Sign out"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            </div>
+          <div className="px-3 pb-2 sm:hidden">
+            <ThemeToggle className="w-full justify-center" />
           </div>
+          <SidebarFooter
+            orgName={orgName}
+            tier={tier}
+            userName={userName}
+            userEmail={userEmail}
+            isDemo={isDemo}
+          />
         </SheetContent>
       </Sheet>
     </header>
+  );
+}
+
+/** Small inline demo hint used on marketing/auth surfaces. */
+export function DemoHint() {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <Sparkles className="h-3 w-3 text-warning" /> Demo mode
+    </span>
   );
 }

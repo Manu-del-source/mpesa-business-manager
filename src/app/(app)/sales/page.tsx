@@ -3,9 +3,10 @@ import { requireAppContext } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatDateTime, formatKES } from "@/lib/format";
 import { PageHeader } from "@/components/layout/page-header";
-import { Card, CardContent } from "@/components/ui/card";
+import { StatCard } from "@/components/layout/stat-card";
+import { FilterBar } from "@/components/layout/filter-bar";
+import { Card, CardContent, CardToolbar } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/layout/empty-state";
 import { SearchInput } from "@/components/layout/search-input";
 import {
@@ -30,7 +31,8 @@ import {
 } from "@/components/shared/status";
 import { PosDialog } from "@/components/sales/pos-dialog";
 import { SaleDetailSheet, type SaleForDetail } from "@/components/sales/sale-detail-sheet";
-import { ReceiptText } from "lucide-react";
+import { Banknote, CheckCircle2, Clock, ReceiptText } from "lucide-react";
+import { formatCompactKES } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Sales" };
 
@@ -52,7 +54,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Search
     ];
   }
 
-  const [sales, products, customers] = await Promise.all([
+  const [sales, products, customers, totals, completedCount, pendingCount] = await Promise.all([
     prisma.sale.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -67,7 +69,20 @@ export default async function SalesPage({ searchParams }: { searchParams: Search
       where: { organizationId: ctx.orgId },
       orderBy: { name: "asc" },
     }),
+    prisma.sale.aggregate({
+      where: { organizationId: ctx.orgId, status: "COMPLETED" },
+      _sum: { total: true },
+      _count: true,
+    }),
+    prisma.sale.count({ where: { organizationId: ctx.orgId, status: "COMPLETED" } }),
+    prisma.sale.count({ where: { organizationId: ctx.orgId, status: "PENDING" } }),
   ]);
+
+  const lifetimeRevenue = totals._sum.total?.toNumber() ?? 0;
+  const averageSale = completedCount > 0 ? lifetimeRevenue / completedCount : 0;
+  const hasFilters = Boolean(
+    q || (method && method !== "ALL") || (status && status !== "ALL"),
+  );
 
   const posProducts = products.map((p) => ({
     id: p.id,
@@ -105,67 +120,106 @@ export default async function SalesPage({ searchParams }: { searchParams: Search
     <div className="space-y-6">
       <PageHeader
         title="Sales"
-        description={`${sales.length} recent sale${sales.length === 1 ? "" : "s"} — record a new sale at the till.`}
+        description="Record sales at the till and review every transaction."
+        eyebrow={
+          <>
+            <ReceiptText className="h-3 w-3" />
+            Point of sale
+          </>
+        }
       >
         <PosDialog products={posProducts} customers={customers} />
       </PageHeader>
 
-      <Card>
-        <CardContent className="p-4">
-          <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" method="GET">
-            <SearchInput
-              name="q"
-              defaultValue={q}
-              placeholder="Search receipt, customer…"
-              className="sm:col-span-2"
-            />
-            <Select name="method" defaultValue={method ?? "ALL"}>
-              <SelectTrigger>
-                <SelectValue placeholder="Payment method" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All methods</SelectItem>
-                {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
-                  <SelectItem key={value} value={value}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select name="status" defaultValue={status ?? "ALL"}>
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All statuses</SelectItem>
-                <SelectItem value="COMPLETED">Completed</SelectItem>
-                <SelectItem value="PENDING">Pending</SelectItem>
-                <SelectItem value="REFUNDED">Refunded</SelectItem>
-                <SelectItem value="CANCELLED">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="lg:col-span-4">
-              <Button type="submit" variant="outline" size="sm">
-                Apply filters
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard
+          label="Lifetime revenue"
+          value={formatCompactKES(lifetimeRevenue)}
+          sub="completed sales"
+          icon={Banknote}
+          accent="success"
+        />
+        <StatCard
+          label="Completed"
+          value={String(completedCount)}
+          sub="sales settled"
+          icon={CheckCircle2}
+          accent="default"
+        />
+        <StatCard
+          label="Pending"
+          value={String(pendingCount)}
+          sub="awaiting payment"
+          icon={Clock}
+          accent={pendingCount > 0 ? "warning" : "default"}
+        />
+        <StatCard
+          label="Average sale"
+          value={formatCompactKES(averageSale)}
+          sub="per completed sale"
+          icon={ReceiptText}
+          accent="info"
+        />
+      </div>
+
+      <FilterBar>
+        <SearchInput
+          name="q"
+          defaultValue={q}
+          placeholder="Search receipt or customer…"
+          className="sm:col-span-2"
+        />
+        <Select name="method" defaultValue={method ?? "ALL"}>
+          <SelectTrigger>
+            <SelectValue placeholder="Payment method" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All methods</SelectItem>
+            {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select name="status" defaultValue={status ?? "ALL"}>
+          <SelectTrigger>
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All statuses</SelectItem>
+            <SelectItem value="COMPLETED">Completed</SelectItem>
+            <SelectItem value="PENDING">Pending</SelectItem>
+            <SelectItem value="REFUNDED">Refunded</SelectItem>
+            <SelectItem value="CANCELLED">Cancelled</SelectItem>
+          </SelectContent>
+        </Select>
+      </FilterBar>
 
       {sales.length === 0 ? (
         <EmptyState
           icon={<ReceiptText className="h-5 w-5" />}
-          title="No sales found"
-          description="Record your first sale with the till above — it takes seconds."
+          title={hasFilters ? "No matching sales" : "No sales yet"}
+          description={
+            hasFilters
+              ? "Try clearing the filters or searching for a different receipt."
+              : "Record your first sale with the till above — it takes seconds."
+          }
         />
       ) : (
         <>
           {/* Desktop table */}
-          <Card className="hidden sm:block">
+          <Card className="hidden overflow-hidden sm:block">
+            <CardToolbar>
+              <h3 className="text-sm font-semibold tracking-tight">Recent sales</h3>
+              <span className="text-xs text-muted-foreground">
+                Showing {sales.length}
+                {sales.length === 100 ? " (most recent)" : ""}
+              </span>
+            </CardToolbar>
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="hover:bg-transparent">
                   <TableHead>Receipt</TableHead>
                   <TableHead>Customer</TableHead>
                   <TableHead>Items</TableHead>
@@ -179,10 +233,14 @@ export default async function SalesPage({ searchParams }: { searchParams: Search
                 {serializedSales.map((sale) => (
                   <SaleDetailSheet key={sale.id} sale={sale}>
                     <TableRow className="cursor-pointer" data-sale-row>
-                      <TableCell className="font-medium">{sale.receiptNo}</TableCell>
-                      <TableCell>{sale.customer?.name ?? "Walk-in"}</TableCell>
-                      <TableCell>
-                        {sale.items.reduce((n, i) => n + i.quantity, 0)} items
+                      <TableCell className="font-mono text-xs font-medium">
+                        {sale.receiptNo}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {sale.customer?.name ?? "Walk-in"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {sale.items.reduce((n, i) => n + i.quantity, 0)}
                       </TableCell>
                       <TableCell>
                         <PaymentMethodBadge method={sale.paymentMethod} />
@@ -193,7 +251,7 @@ export default async function SalesPage({ searchParams }: { searchParams: Search
                       <TableCell className="text-right font-semibold tabular-nums">
                         {formatKES(sale.total)}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                         {formatDateTime(sale.createdAt)}
                       </TableCell>
                     </TableRow>
@@ -204,22 +262,28 @@ export default async function SalesPage({ searchParams }: { searchParams: Search
           </Card>
 
           {/* Mobile cards */}
-          <div className="space-y-3 sm:hidden">
+          <div className="space-y-2.5 sm:hidden">
             {serializedSales.map((sale) => (
               <SaleDetailSheet key={sale.id} sale={sale}>
-                <Card className="cursor-pointer">
+                <Card interactive>
                   <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="font-medium">{sale.customer?.name ?? "Walk-in"}</p>
-                        <p className="text-xs text-muted-foreground">{sale.receiptNo}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">
+                          {sale.customer?.name ?? "Walk-in customer"}
+                        </p>
+                        <p className="truncate font-mono text-xs text-muted-foreground">
+                          {sale.receiptNo}
+                        </p>
                       </div>
-                      <p className="text-base font-bold">{formatKES(sale.total)}</p>
+                      <p className="shrink-0 text-base font-semibold tabular-nums">
+                        {formatKES(sale.total)}
+                      </p>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <PaymentMethodBadge method={sale.paymentMethod} />
                       <SaleStatusBadge status={sale.status} />
-                      <Badge variant="muted">
+                      <Badge variant="muted" size="sm">
                         {sale.items.reduce((n, i) => n + i.quantity, 0)} items
                       </Badge>
                     </div>
