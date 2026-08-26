@@ -145,6 +145,7 @@ model Application {
   providerConnections ProviderConnection[]
   accounts        Account[]
   journalTransactions JournalTransaction[]
+  payments        Payment[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -333,6 +334,139 @@ model LedgerEntry {
 enum LedgerEntryType {
   DEBIT
   CREDIT
+}
+
+// ---------------------------------------------------------------------------
+// Payment domain (provider-agnostic)
+// ---------------------------------------------------------------------------
+
+/// Provider-agnostic payment status. Every state transition is recorded
+/// in PaymentAttempt; the Payment.status is the current aggregated state.
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+/// Provider-agnostic payment direction.
+enum PaymentDirection {
+  INCOMING
+  OUTGOING
+}
+
+/// A provider-agnostic payment record. Replaces MpesaTransaction as the
+/// source of truth for all payment activity. Legacy MpesaTransaction rows
+/// are linked via PaymentProviderReference.
+///
+/// State machine:
+///   PENDING → PROCESSING → SUCCEEDED → REFUNDED
+///                    ↘ FAILED
+///          → CANCELLED
+model Payment {
+  id            String          @id @default(cuid())
+  applicationId String
+  environment   Environment     @default(SANDBOX)
+  direction     PaymentDirection @default(INCOMING)
+  status        PaymentStatus   @default(PENDING)
+
+  // Amount in minor units (cents). KES only initially.
+  amountMinor   BigInt
+  currency      String          @default("KES")
+
+  // Customer/supplier info
+  phone         String?
+  email         String?
+  customerName  String?
+
+  // Description and references
+  description   String?
+  idempotencyKey String?        // Client-provided idempotency key
+  reference     String?         // External reference (order ID, receipt, etc.)
+
+  // Timestamps
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  processedAt   DateTime?       // When status moved to SUCCEEDED/FAILED/CANCELLED
+
+  application   Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  attempts      PaymentAttempt[]
+  providerRefs  PaymentProviderReference[]
+
+  @@unique([applicationId, idempotencyKey])
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, status])
+  @@index([applicationId, createdAt])
+  @@index([idempotencyKey])
+  @@index([status])
+}
+
+/// Individual attempt to process a payment through a provider. A single
+/// Payment may have multiple attempts (retries, different providers).
+/// Each attempt is immutable once created — the state machine append-only.
+model PaymentAttempt {
+  id                   String   @id @default(cuid())
+  paymentId            String
+  provider             String   // "daraja", "sandbox"
+  status               String   // "PENDING", "ACCEPTED", "REJECTED", "ERROR"
+  providerRequestId    String?  // Provider's request ID (e.g. MerchantRequestID)
+  providerCheckoutId   String?  // Provider's checkout/session ID (e.g. CheckoutRequestID)
+  providerResponse     Json?    // Full provider response (sanitized)
+  errorCode            String?  // Provider-specific error code
+  errorMessage         String?  // Human-readable error from provider
+  amountMinor          BigInt   // Amount attempted
+  currency             String   @default("KES")
+  createdAt            DateTime @default(now())
+  completedAt          DateTime?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([providerRequestId])
+  @@index([providerCheckoutId])
+}
+
+/// Provider-specific correlation IDs for a payment. Links the
+/// provider-agnostic Payment to provider-specific records (e.g.
+/// MpesaTransaction). Used for reconciliation and debugging.
+model PaymentProviderReference {
+  id                String   @id @default(cuid())
+  paymentId         String
+  provider          String   // "daraja", "sandbox"
+  externalId        String   // Provider's external ID (e.g. checkoutRequestId)
+  externalType      String   // "checkout_request", "merchant_request", "receipt"
+  legacyModelId     String?  // FK to legacy model (e.g. MpesaTransaction.id)
+  legacyModelName   String?  // "MpesaTransaction"
+  createdAt         DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, externalId])
+  @@index([paymentId])
+  @@index([externalId])
+  @@index([legacyModelId])
+}
+
+/// Durable idempotency key. Prevents duplicate financial operations when
+/// clients retry requests. Each record is scoped to an application +
+/// environment and has a TTL.
+model IdempotencyRecord {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  key           String      // The idempotency key provided by the client
+  requestHash   String      // Hash of the request body (detects changed payloads)
+  responseStatus Int        // HTTP status code to return
+  responseBody  Json        // Response body to return
+  expiresAt     DateTime    // TTL — clean up old records
+  createdAt     DateTime    @default(now())
+
+  @@unique([applicationId, environment, key])
+  @@index([applicationId, environment, key])
+  @@index([expiresAt])
 }
 
 // ---------------------------------------------------------------------------

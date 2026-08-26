@@ -1,90 +1,50 @@
 import { type NextRequest } from "next/server";
 import { withApiKeyAuth, requirePermission, apiError } from "@/lib/middleware";
-import { prisma } from "@/lib/prisma";
-import type { MpesaStatus } from "@/generated/prisma";
+import { createPayment, listPayments } from "@/lib/payments";
+import { z } from "zod";
+import type { PaymentStatus } from "@/generated/prisma";
+
+const createPaymentSchema = z.object({
+  amountMinor: z.number().int().positive().max(15_000_000),
+  currency: z.string().default("KES"),
+  direction: z.enum(["INCOMING", "OUTGOING"]).default("INCOMING"),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  customerName: z.string().optional(),
+  description: z.string().max(500).optional(),
+  idempotencyKey: z.string().max(200).optional(),
+  reference: z.string().max(200).optional(),
+});
 
 /**
  * GET /v1/payments
  *
  * List payments for the authenticated application's environment.
- * Requires a valid API key with `payments:read` scope.
- *
- * Query params:
- *   - status: filter by payment status (PENDING, SUCCESS, FAILED, etc.)
- *   - limit: max results (default 50, max 100)
- *   - cursor: pagination cursor (the id of the last item)
+ * Requires `payments:read` scope.
  */
 export async function GET(request: NextRequest) {
-  const ctx = await withApiKeyAuth(request, {
-    requiredScopes: ["payments:read"],
-  });
+  const ctx = await withApiKeyAuth(request, { requiredScopes: ["payments:read"] });
   if (ctx instanceof Response) return ctx;
 
   const permErr = requirePermission(ctx, "payments:read");
   if (permErr) return permErr;
 
-  // Parse query params
   const url = new URL(request.url);
-  const status = url.searchParams.get("status") as MpesaStatus | null;
+  const status = url.searchParams.get("status") as PaymentStatus | null;
   const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10), 100);
   const cursor = url.searchParams.get("cursor");
 
-  // Build query — scoped to tenant's organizations
-  const orgIds = await prisma.organization
-    .findMany({
-      where: { tenantId: ctx.tenant.id },
-      select: { id: true },
-    })
-    .then((orgs) => orgs.map((o) => o.id));
-
-  const where: Record<string, unknown> = {
-    organizationId: { in: orgIds },
-  };
-
-  if (status) {
-    where.status = status;
-  }
-
-  if (cursor) {
-    where.createdAt = { ...(where.createdAt as object ?? {}), lt: await getCursorDate(cursor) };
-  }
-
-  const transactions = await prisma.mpesaTransaction.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: limit + 1, // Fetch one extra to determine if there are more
-    select: {
-      id: true,
-      phone: true,
-      amount: true,
-      status: true,
-      receiptNo: true,
-      reference: true,
-      direction: true,
-      createdAt: true,
-      completedAt: true,
-    },
+  const result = await listPayments(ctx.application.id, ctx.environment, {
+    status: status ?? undefined,
+    limit,
+    cursor: cursor ?? undefined,
   });
 
-  const hasMore = transactions.length > limit;
-  const data = hasMore ? transactions.slice(0, limit) : transactions;
-  const nextCursor = hasMore ? data[data.length - 1]?.id ?? null : null;
-
   return Response.json({
-    data: data.map((t) => ({
-      id: t.id,
-      phone: t.phone,
-      amount: t.amount.toString(),
-      status: t.status,
-      receiptNo: t.receiptNo,
-      reference: t.reference,
-      direction: t.direction,
-      createdAt: t.createdAt.toISOString(),
-      completedAt: t.completedAt?.toISOString() ?? null,
-    })),
+    data: result.data,
     pagination: {
-      hasMore,
-      nextCursor,
+      hasMore: result.nextCursor !== null,
+      nextCursor: result.nextCursor,
       limit,
     },
     meta: {
@@ -95,10 +55,45 @@ export async function GET(request: NextRequest) {
   });
 }
 
-async function getCursorDate(cursorId: string): Promise<Date> {
-  const cursor = await prisma.mpesaTransaction.findUnique({
-    where: { id: cursorId },
-    select: { createdAt: true },
+/**
+ * POST /v1/payments
+ *
+ * Create a new payment. Idempotent when idempotencyKey is provided.
+ * Requires `payments:create` scope.
+ */
+export async function POST(request: NextRequest) {
+  const ctx = await withApiKeyAuth(request, { requiredScopes: ["payments:create"] });
+  if (ctx instanceof Response) return ctx;
+
+  const permErr = requirePermission(ctx, "payments:create");
+  if (permErr) return permErr;
+
+  const body = await request.json().catch(() => null);
+  const parsed = createPaymentSchema.safeParse(body);
+  if (!parsed.success) {
+    return apiError({
+      code: "VALIDATION_ERROR",
+      message: "Invalid payment request.",
+      status: 422,
+      details: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const result = await createPayment({
+    applicationId: ctx.application.id,
+    environment: ctx.environment,
+    ...parsed.data,
   });
-  return cursor?.createdAt ?? new Date();
+
+  if (!result.ok) {
+    return apiError({ code: result.code, message: result.error, status: 400 });
+  }
+
+  return Response.json(
+    {
+      data: result.payment,
+      meta: { requestId: ctx.requestId },
+    },
+    { status: 201 },
+  );
 }
