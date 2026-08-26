@@ -154,6 +154,8 @@ model Permission {
   name        String   @unique // e.g. "payments:create", "ledger:read"
   description String?
   createdAt   DateTime @default(now())
+
+  roles Role[]
 }
 
 /// Role with explicit permissions. Maps to TenantRole enum but allows
