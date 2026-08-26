@@ -143,6 +143,8 @@ model Application {
   tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   apiKeys         ApiKey[]
   providerConnections ProviderConnection[]
+  accounts        Account[]
+  journalTransactions JournalTransaction[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -221,6 +223,116 @@ enum ApiKeyType {
   PUBLIC
   SECRET
   WEBHOOK_SECRET
+}
+
+// ---------------------------------------------------------------------------
+// Financial core (double-entry ledger)
+// ---------------------------------------------------------------------------
+
+/// Standard account types following double-entry bookkeeping conventions.
+/// Assets and expenses carry normal debit balances; liabilities, equity, and
+/// revenue carry normal credit balances.
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+/// Chart of accounts entry. Each Account belongs to an Application and is
+/// scoped to an Environment (SANDBOX or LIVE). Accounts are hierarchical
+/// (parent/child) but balances are always computed from the ledger entries
+/// — never stored on the Account row itself.
+///
+/// Invariant: an Account's balance is the sum of all non-voided LedgerEntry
+/// rows referencing it, respecting normal balance direction.
+model Account {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  code          String      // Human-readable code, e.g. "1000", "2010"
+  name          String      // "Cash on Hand", "M-Pesa Float", "Sales Revenue"
+  type          AccountType
+  parentId      String?     // For hierarchical chart of accounts
+  currency      String      @default("KES")
+  active        Boolean     @default(true)
+  description   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  parent      Account?     @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children    Account[]    @relation("AccountHierarchy")
+  entries     LedgerEntry[]
+
+  @@unique([applicationId, environment, code])
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, environment, type])
+}
+
+/// A balanced journal entry — the atomic unit of the ledger. Every financial
+/// event creates exactly one JournalTransaction with two or more LedgerEntry
+/// rows whose debits equal credits.
+///
+/// Invariants:
+///  - sum(debits) == sum(credits) for all non-voided entries
+///  - at least two entries per journal transaction
+///  - JournalTransaction is never modified after creation (immutable)
+model JournalTransaction {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  reference     String?     // External reference (payment ID, receipt number, etc.)
+  description   String      // "Payment from customer", "Refund for order #123"
+  postedAt      DateTime    @default(now()) // When the entry was posted
+  voidedAt      DateTime?   // Non-null = this entire journal entry is voided
+  voidedBy      String?     // Actor who voided
+  voidReason    String?     // Reason for voiding
+  createdAt     DateTime    @default(now())
+
+  application Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  entries     LedgerEntry[]
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, postedAt])
+  @@index([reference])
+}
+
+/// A single debit or credit line within a JournalTransaction. LedgerEntry
+/// rows are append-only — they are never updated or deleted in normal
+/// operation. To reverse an entry, post a new JournalTransaction with
+/// opposite debits/credits.
+///
+/// Invariants:
+///  - amountMinor > 0 (entries always carry a positive amount)
+///  - type must match Account.type's normal balance:
+///    DEBIT entries reduce credit-balance accounts (LIABILITY, EQUITY, REVENUE)
+///    CREDIT entries reduce debit-balance accounts (ASSET, EXPENSE)
+model LedgerEntry {
+  id                   String      @id @default(cuid())
+  journalTransactionId String
+  accountId            String
+  type                 LedgerEntryType
+  amountMinor          BigInt      // Amount in minor units (cents), always > 0
+  currency             String      @default("KES")
+  description          String?
+  createdAt            DateTime    @default(now())
+
+  journalTransaction JournalTransaction @relation(fields: [journalTransactionId], references: [id], onDelete: Restrict)
+  account            Account             @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([journalTransactionId])
+  @@index([accountId])
+  @@index([accountId, createdAt])
+  @@index([createdAt])
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
 }
 
 // ---------------------------------------------------------------------------
