@@ -146,6 +146,8 @@ model Application {
   accounts        Account[]
   journalTransactions JournalTransaction[]
   payments        Payment[]
+  reconciliationRuns ReconciliationRun[]
+  allocationRules AllocationRule[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -266,6 +268,7 @@ model Account {
   parent      Account?     @relation("AccountHierarchy", fields: [parentId], references: [id])
   children    Account[]    @relation("AccountHierarchy")
   entries     LedgerEntry[]
+  allocations Allocation[]
 
   @@unique([applicationId, environment, code])
   @@index([applicationId])
@@ -394,6 +397,9 @@ model Payment {
   application   Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   attempts      PaymentAttempt[]
   providerRefs  PaymentProviderReference[]
+  allocations   Allocation[]
+  reconciledItems ReconciliationItem[]
+  reconciledExceptions ReconciliationException[]
 
   @@unique([applicationId, idempotencyKey])
   @@index([applicationId])
@@ -467,6 +473,147 @@ model IdempotencyRecord {
   @@unique([applicationId, environment, key])
   @@index([applicationId, environment, key])
   @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation
+// ---------------------------------------------------------------------------
+
+/// A reconciliation run — compares internal payment records against
+/// provider records to find discrepancies.
+model ReconciliationRun {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  status        String      @default("RUNNING") // RUNNING, COMPLETED, FAILED
+  startedAt     DateTime    @default(now())
+  completedAt   DateTime?
+  totalChecked  Int         @default(0)
+  matched       Int         @default(0)
+  discrepancies Int         @default(0)
+  error         String?
+
+  application Application           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  items       ReconciliationItem[]
+  exceptions  ReconciliationException[]
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, startedAt])
+}
+
+/// Individual item checked during a reconciliation run.
+model ReconciliationItem {
+  id                 String   @id @default(cuid())
+  reconciliationRunId String
+  paymentId          String?
+  externalId         String?  // Provider's ID (checkoutRequestId, etc.)
+  internalStatus     String?  // Our payment status
+  externalStatus     String?  // Provider's reported status
+  match              Boolean  @default(true) // Whether internal matches external
+  discrepancyType   String?  // "STATUS_MISMATCH", "AMOUNT_MISMATCH", "MISSING_INTERNAL", "MISSING_EXTERNAL"
+  details            Json?    // Additional comparison details
+  createdAt          DateTime @default(now())
+
+  reconciliationRun ReconciliationRun @relation(fields: [reconciliationRunId], references: [id], onDelete: Cascade)
+  payment           Payment?          @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([reconciliationRunId])
+  @@index([paymentId])
+}
+
+/// A reconciliation exception — a discrepancy that requires human review
+/// or automated resolution.
+model ReconciliationException {
+  id                 String   @id @default(cuid())
+  reconciliationRunId String
+  paymentId          String?
+  type               String   // "STATUS_MISMATCH", "AMOUNT_MISMATCH", "MISSING_RECORD", "DUPLICATE"
+  severity           String   @default("WARNING") // INFO, WARNING, CRITICAL
+  description        String
+  suggestedAction    String?  // "Update status to SUCCESS", "Flag for review"
+  resolved           Boolean  @default(false)
+  resolvedAt         DateTime?
+  resolvedBy         String?
+  resolution         String?  // How it was resolved
+  createdAt          DateTime @default(now())
+
+  reconciliationRun ReconciliationRun @relation(fields: [reconciliationRunId], references: [id], onDelete: Cascade)
+  payment           Payment?          @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([reconciliationRunId])
+  @@index([paymentId])
+  @@index([resolved])
+}
+
+// ---------------------------------------------------------------------------
+// Allocation engine
+// ---------------------------------------------------------------------------
+
+/// A rule that determines how incoming payments are split across accounts.
+/// Rules are versioned so historical allocations are preserved when rules change.
+model AllocationRule {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  name          String      // "Default split", "Tax allocation", etc.
+  description   String?
+  active        Boolean     @default(true)
+  priority      Int         @default(0) // Higher = evaluated first
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  versions    AllocationRuleVersion[]
+  allocations Allocation[]
+
+  @@unique([applicationId, environment, name])
+  @@index([applicationId])
+  @@index([applicationId, environment, active])
+}
+
+/// A version of an allocation rule. Each version contains the actual split
+/// percentages/amounts. Old versions are preserved for historical audit.
+model AllocationRuleVersion {
+  id                String   @id @default(cuid())
+  allocationRuleId String
+  version           Int      // Sequential version number
+  // Split definition: JSON array of { accountId, type, percentage } or { accountId, type, fixedAmountMinor }
+  splits            Json     // [{ accountId, type: "percentage"|"fixed", value }]
+  roundingMode      String   @default("HALF_UP") // HALF_UP, HALF_DOWN, TRUNCATE, CEIL
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  allocationRule AllocationRule @relation(fields: [allocationRuleId], references: [id], onDelete: Cascade)
+  allocations    Allocation[] @relation("VersionAllocations")
+
+  @@unique([allocationRuleId, version])
+  @@index([allocationRuleId])
+}
+
+/// A concrete allocation applied to a specific payment. Records exactly
+/// how a payment was split across accounts.
+model Allocation {
+  id                     String   @id @default(cuid())
+  paymentId              String
+  allocationRuleId       String?
+  allocationRuleVersionId String?
+  accountId              String
+  amountMinor            BigInt   // Amount allocated to this account (always > 0)
+  currency               String   @default("KES")
+  percentage             Float?   // Original percentage if percentage-based split
+  roundingApplied        String?  // Rounding adjustment description
+  createdAt              DateTime @default(now())
+
+  payment              Payment              @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  allocationRule       AllocationRule?      @relation(fields: [allocationRuleId], references: [id], onDelete: SetNull)
+  allocationRuleVersion AllocationRuleVersion? @relation("VersionAllocations", fields: [allocationRuleVersionId], references: [id], onDelete: SetNull)
+  account              Account              @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([accountId])
+  @@index([allocationRuleId])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------
