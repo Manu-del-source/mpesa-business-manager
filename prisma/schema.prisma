@@ -58,6 +58,25 @@ enum MpesaEnvironment {
   PRODUCTION
 }
 
+/// Platform-wide environment isolation for infrastructure resources.
+/// Every financial record (payments, ledger entries, payouts, refunds,
+/// API keys…) carries an environment; SANDBOX data can never interact with
+/// live provider traffic.
+enum Environment {
+  SANDBOX
+  LIVE
+}
+
+/// Roles a user can hold within a Tenant. Authorization never relies on role
+/// names alone — permissions are resolved from these roles (see lib/rbac).
+enum TenantRole {
+  OWNER
+  ADMIN
+  DEVELOPER
+  FINANCE
+  VIEWER
+}
+
 enum ExpenseCategory {
   INVENTORY
   RENT
@@ -72,7 +91,138 @@ enum ExpenseCategory {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-tenancy
+// Multi-tenancy (infrastructure core)
+// ---------------------------------------------------------------------------
+
+/// Tenant = an independent business/customer of the platform (e.g. STOR1).
+/// Tenants own Applications; Applications own API keys and (in later phases)
+/// payments, ledger accounts, payouts, webhooks, etc. All infrastructure
+/// resources are tenant-scoped.
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications  Application[]
+  members       TenantMember[]
+  organizations Organization[]
+
+  @@index([createdAt])
+}
+
+/// Membership of a Supabase Auth user in a Tenant. A user may belong to many
+/// tenants; authorization checks resolve permissions from this role.
+model TenantMember {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      TenantRole @default(VIEWER)
+  createdAt DateTime   @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+/// Application = a product/surface within a Tenant (STOR1 Web, STOR1 Mobile…).
+/// Every application implicitly has SANDBOX and LIVE environments; individual
+/// records carry the `Environment` enum. An application belongs to exactly
+/// one tenant.
+model Application {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  slug        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apiKeys         ApiKey[]
+  providerConnections ProviderConnection[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+}
+
+/// Explicit permission grant for a role. Avoids relying on role names alone.
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique // e.g. "payments:create", "ledger:read"
+  description String?
+  createdAt   DateTime @default(now())
+}
+
+/// Role with explicit permissions. Maps to TenantRole enum but allows
+/// granular permission management without enum changes.
+model Role {
+  id          String       @id @default(cuid())
+  name        TenantRole   @unique
+  description String?
+  permissions Permission[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+/// API key for an Application in a specific Environment.
+/// Public keys (pk_*) are safe to expose; Secret keys (sk_*) and Webhook
+/// signing secrets (whsec_*) are stored hashed and only shown once on creation.
+model ApiKey {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  name          String
+  keyType       ApiKeyType
+  prefix        String      // "pk_test", "sk_live", "whsec" — for identification
+  keyHash       String      // bcrypt hash of the secret portion
+  keyPreview    String      // Last 4 chars of secret for display (e.g. "sk_live_...abcd")
+  scopes        String[]    // Permission names this key grants
+  expiresAt     DateTime?
+  revokedAt     DateTime?
+  lastUsedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([keyHash])
+}
+
+/// Provider connection (Daraja, etc.) per Application + Environment.
+/// Replaces per-Organization MpesaConfig. Secrets encrypted at rest.
+model ProviderConnection {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  provider      String      // "daraja", "sandbox"
+  displayName   String      // Human-readable name
+  config        Json        // Provider-specific config (shortcode, etc.)
+  credentials   Json        // Encrypted secrets (consumerSecret, passkey, etc.)
+  enabled       Boolean     @default(false)
+  isDefault     Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, environment, provider])
+  @@index([applicationId])
+  @@index([applicationId, environment])
+}
+
+enum ApiKeyType {
+  PUBLIC
+  SECRET
+  WEBHOOK_SECRET
+}
+
+// ---------------------------------------------------------------------------
+// Multi-tenancy (legacy POS layer — kept for the existing business manager)
 // ---------------------------------------------------------------------------
 
 model Organization {
@@ -84,6 +234,11 @@ model Organization {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
+  /// Infrastructure tenant this POS organization belongs to (1:1 during the
+  /// transition). Null only for rows created before the tenant backfill.
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
   members          OrganizationMember[]
   products         Product[]
   customers        Customer[]
@@ -93,6 +248,7 @@ model Organization {
   mpesaConfig      MpesaConfig?
 
   @@index([tier])
+  @@index([tenantId])
 }
 
 // userId references a Supabase Auth user id (or "demo-user" in demo mode).
