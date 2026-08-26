@@ -64,8 +64,9 @@ export type TenantContext = AppContext & {
 export const DEMO_SESSION_COOKIE = "mbm_demo_session";
 export const DEMO_USER_ID = "demo-user";
 export const DEMO_ORG_SLUG = "kijani-fresh-foods";
-const DEMO_TENANT_SLUG = "demo-tenant";
-const DEMO_APP_SLUG = "demo-app";
+export const ACTIVE_TENANT_COOKIE = "mbm_active_tenant";
+export const ACTIVE_ENVIRONMENT_COOKIE = "mbm_active_environment";
+const DEMO_APP_SLUG = "default-app";
 
 // ---------------------------------------------------------------------------
 // User resolution
@@ -292,24 +293,47 @@ export async function requireAppContext(): Promise<AppContext> {
  */
 export async function requireTenantContext(): Promise<TenantContext> {
   const appCtx = await requireAppContext();
+  const store = await cookies();
 
-  const { tenant, application } = await ensureTenantForOrg(
-    appCtx.orgId,
-    appCtx.org.name,
-    appCtx.org.slug,
-  );
+  // Check for explicit tenant selection via cookie (for multi-tenant users)
+  const activeTenantSlug = store.get(ACTIVE_TENANT_COOKIE)?.value;
+  const activeEnv = store.get(ACTIVE_ENVIRONMENT_COOKIE)?.value as Environment | undefined;
+
+  let tenantResult: { tenant: { id: string; name: string; slug: string }; application: { id: string; name: string; slug: string } };
+
+  if (activeTenantSlug) {
+    // Resolve by slug from cookie — user explicitly chose this tenant
+    const tenant = await prisma.tenant.findUnique({
+      where: { slug: activeTenantSlug },
+      select: { id: true, name: true, slug: true },
+    });
+    if (tenant) {
+      let app = await prisma.application.findFirst({ where: { tenantId: tenant.id } });
+      if (!app) {
+        app = await prisma.application.create({
+          data: { tenantId: tenant.id, name: `${tenant.name} App`, slug: DEMO_APP_SLUG },
+        });
+      }
+      tenantResult = { tenant, application: app };
+    } else {
+      // Cookie points to a deleted tenant — fall back to org-based resolution
+      tenantResult = await ensureTenantForOrg(appCtx.orgId, appCtx.org.name, appCtx.org.slug);
+    }
+  } else {
+    // Default: resolve from org (auto-provisions if needed)
+    tenantResult = await ensureTenantForOrg(appCtx.orgId, appCtx.org.name, appCtx.org.slug);
+  }
 
   const tenantRole = await ensureTenantMember(
-    tenant.id,
+    tenantResult.tenant.id,
     appCtx.user.id,
     appCtx.role,
   );
 
   return {
     ...appCtx,
-    tenant,
-    application,
-    environment: "SANDBOX" as Environment, // Default to sandbox for safety
+    ...tenantResult,
+    environment: activeEnv ?? "SANDBOX" as Environment,
     tenantRole,
   };
 }
