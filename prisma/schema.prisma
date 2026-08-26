@@ -148,6 +148,11 @@ model Application {
   payments        Payment[]
   reconciliationRuns ReconciliationRun[]
   allocationRules AllocationRule[]
+  payouts         Payout[]
+  refunds         Refund[]
+  events          Event[]
+  outboxRecords   OutboxRecord[]
+  webhookEndpoints WebhookEndpoint[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -400,6 +405,7 @@ model Payment {
   allocations   Allocation[]
   reconciledItems ReconciliationItem[]
   reconciledExceptions ReconciliationException[]
+  refunds         Refund[]
 
   @@unique([applicationId, idempotencyKey])
   @@index([applicationId])
@@ -613,6 +619,175 @@ model Allocation {
   @@index([paymentId])
   @@index([accountId])
   @@index([allocationRuleId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Payouts
+// ---------------------------------------------------------------------------
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model Payout {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  status        PayoutStatus @default(PENDING)
+  amountMinor   BigInt
+  currency      String      @default("KES")
+  recipientPhone String
+  recipientName String?
+  description   String?
+  reference     String?
+  idempotencyKey String?
+  providerRequestId String?
+  errorCode     String?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  processedAt   DateTime?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, idempotencyKey])
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, status])
+  @@index([idempotencyKey])
+}
+
+// ---------------------------------------------------------------------------
+// Refunds
+// ---------------------------------------------------------------------------
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model Refund {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  paymentId     String
+  status        RefundStatus @default(PENDING)
+  amountMinor   BigInt       // Refund amount (must not exceed original payment)
+  currency      String      @default("KES")
+  reason        String?
+  reference     String?
+  idempotencyKey String?
+  errorCode     String?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  processedAt   DateTime?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  payment     Payment     @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@unique([applicationId, idempotencyKey])
+  @@index([applicationId])
+  @@index([paymentId])
+  @@index([idempotencyKey])
+}
+
+// ---------------------------------------------------------------------------
+// Events & Outbox
+// ---------------------------------------------------------------------------
+
+model Event {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  type          String      // "payment.created", "payment.succeeded", "payout.completed", etc.
+  aggregateType String      // "Payment", "Payout", "Refund", etc.
+  aggregateId   String      // ID of the entity this event is about
+  payload       Json        // Event-specific data
+  metadata      Json?       // Correlation IDs, actor info, etc.
+  createdAt     DateTime    @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([applicationId, type])
+  @@index([applicationId, aggregateType, aggregateId])
+  @@index([createdAt])
+}
+
+model OutboxRecord {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  eventType     String      // Event type to dispatch
+  payload       Json        // Event payload
+  status        String      @default("PENDING") // PENDING, DISPATCHED, FAILED
+  attempts      Int         @default(0)
+  maxAttempts   Int         @default(5)
+  nextRetryAt   DateTime?
+  lastError     String?
+  createdAt     DateTime    @default(now())
+  dispatchedAt  DateTime?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([applicationId, status])
+  @@index([status, nextRetryAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks
+// ---------------------------------------------------------------------------
+
+model WebhookEndpoint {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  url           String      // HTTPS endpoint to POST events to
+  secret        String      // HMAC signing secret (hashed)
+  events        String[]    // Event types to subscribe to (empty = all)
+  active        Boolean     @default(true)
+  description   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  lastTriggeredAt DateTime?
+
+  application Application      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  deliveries  WebhookDelivery[]
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+}
+
+model WebhookDelivery {
+  id                String   @id @default(cuid())
+  webhookEndpointId String
+  eventType         String
+  payload           Json
+  status            String   @default("PENDING") // PENDING, SENT, FAILED
+  httpStatusCode    Int?
+  responseBody      String?
+  attempts          Int      @default(0)
+  maxAttempts       Int      @default(3)
+  nextRetryAt       DateTime?
+  lastError         String?
+  createdAt         DateTime @default(now())
+  deliveredAt       DateTime?
+
+  webhookEndpoint WebhookEndpoint @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+
+  @@index([webhookEndpointId])
+  @@index([status, nextRetryAt])
   @@index([createdAt])
 }
 
