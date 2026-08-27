@@ -96,6 +96,7 @@ Tenant (STOR1)
 | Allocations | `src/lib/allocations.ts` | Percentage/fixed splits with rounding modes |
 | Payouts | `src/lib/payouts.ts` | B2C payout state machine |
 | Refunds | `src/lib/refunds.ts` | Refund validation + ledger posting |
+| Settlement | `src/lib/settlement.ts` | Durable, retryable, idempotent settlement worker |
 | Events | `src/lib/events.ts` | Event store + transactional outbox |
 | Webhooks | `src/lib/webhooks.ts` | HMAC signing, delivery, retries |
 | Audit | `src/lib/audit.ts` | Append-only audit log |
@@ -110,6 +111,48 @@ PaymentProvider (interface)
   ├── DarajaProvider  (real Safaricom traffic)
   └── SandboxProvider (deterministic simulator)
 ```
+
+## Settlement (durable, retryable, idempotent)
+
+Money movement is never performed inline with a provider callback. The write
+of the provider result and the enqueueing of the settlement work happen in
+ONE database transaction (transactional outbox, `OutboxRecord` with
+`settlement.*` event types), so a crash between "payment recorded" and
+"payment settled" is impossible — the work is already durable.
+
+Two settlement paths, both idempotent:
+
+1. **Payment → ledger** (`settlePaymentToLedger`): a `SUCCEEDED` payment is
+   posted to the double-entry ledger exactly once (debit `MPESA-FLOAT`,
+   credit `SETTLEMENT` revenue). The journal reference
+   `payment-settlement:<paymentId>` plus a `SELECT … FOR UPDATE` lock on the
+   payment serialize concurrent attempts; a re-run returns
+   `already_settled` instead of double-posting.
+2. **Legacy POS sale** (`settleLinkedSale`): a successful M-Pesa callback for
+   a linked sale flips the sale `PENDING → COMPLETED` and decrements stock
+   inside one transaction. The flip is a guarded conditional update
+   (`WHERE status = 'PENDING'`), so retries and replayed callbacks can never
+   complete the sale or decrement stock twice.
+
+Failure handling: the worker (`processPendingSettlements`) claims due
+records with `FOR UPDATE SKIP LOCKED` (safe to run concurrently), retries
+with exponential backoff (1s → 2s → 4s … capped at 60s), and after
+`maxAttempts` (default 5) marks the record terminally `FAILED` — loud for
+operations, never silently dropped. A settlement failure never masks the
+provider result: the callback is acknowledged and only the financial side
+is retried.
+
+Integrity guards (each fails the settlement transaction — retryable, never
+silent):
+
+- a payment whose settlement accounts (`MPESA-FLOAT` / `SETTLEMENT`) are
+  inactive is not posted;
+- a sale line item referencing another organization's product is rejected
+  rather than decrementing foreign stock;
+- a non-KES payment is rejected by the KES settlement accounts.
+
+The sweep runs best-effort after every M-Pesa callback and is scheduled by
+the reconciliation sweep for guaranteed retry.
 
 ## Financial Invariants
 
@@ -127,3 +170,7 @@ PaymentProvider (interface)
 | 10 | API retries don't duplicate money | Idempotency-Key header |
 | 11 | State transitions traceable | State machine + AuditLog |
 | 12 | Reconciliation never rewrites history | Exception-based approach |
+| 13 | A SUCCEEDED payment settles exactly once | Unique journal reference + row lock |
+| 14 | Settlement work is never lost | Transactional outbox + retry/backoff |
+| 15 | Foreign-org product references never move stock | Org check inside settlement tx |
+| 16 | A completed sale decrements stock exactly once | Guarded PENDING→COMPLETED flip |

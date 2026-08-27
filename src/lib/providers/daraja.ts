@@ -54,6 +54,99 @@ type DarajaStkQueryResponse = {
 // DarajaProvider
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+// Pure response-mapping helpers (exported for unit tests)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map an HTTP STK-Push response onto the provider-neutral StkPushResponse.
+ * Pure function — no network, no database — so the mapping contract is unit
+ * tested directly (see src/lib/providers/__tests__/daraja.test.ts).
+ */
+export function mapStkPushHttpResponse(
+  res: { ok: boolean; status: number },
+  data: DarajaStkPushResponse,
+  bodyText: string,
+): StkPushResponse {
+  if (!res.ok) {
+    return {
+      accepted: false,
+      requestId: data.MerchantRequestID ?? null,
+      checkoutId: null,
+      customerMessage:
+        res.status === 400 && data.errorMessage
+          ? `Safaricom rejected: ${data.errorMessage}`
+          : "Safaricom could not process this request.",
+      errorCode: codeForStatus(res.status),
+      errorMessage: data.errorMessage ?? `HTTP ${res.status}`,
+    };
+  }
+
+  if (data.ResponseCode !== "0" || !data.CheckoutRequestID) {
+    return {
+      accepted: false,
+      requestId: data.MerchantRequestID ?? null,
+      checkoutId: null,
+      customerMessage: data.ResponseDescription ?? "Request was not accepted.",
+      errorCode: "DARAJA_ERROR",
+      errorMessage: `ResponseCode=${data.ResponseCode}: ${
+        data.ResponseDescription ?? bodyText.slice(0, 200)
+      }`,
+    };
+  }
+
+  return {
+    accepted: true,
+    requestId: data.MerchantRequestID ?? null,
+    checkoutId: data.CheckoutRequestID,
+    customerMessage:
+      data.CustomerMessage ??
+      "Request accepted. Ask the customer to enter their M-Pesa PIN.",
+  };
+}
+
+/**
+ * Map an HTTP STK-Push QUERY response onto the provider-neutral
+ * PaymentQueryResponse. Pure function (unit tested directly).
+ */
+export function mapStkQueryHttpResponse(
+  res: { ok: boolean; status: number },
+  data: DarajaStkQueryResponse,
+): PaymentQueryResponse {
+  // 500.001.1001 = "transaction is being processed" — still pending
+  if (!res.ok) {
+    if (data.errorCode === "500.001.1001") {
+      return {
+        pending: true,
+        resultCode: null,
+        resultDesc: data.errorMessage ?? null,
+        amountMinor: null,
+        receiptNumber: null,
+        transactionDate: null,
+      };
+    }
+    return {
+      pending: false,
+      resultCode: null,
+      resultDesc: data.errorMessage ?? `HTTP ${res.status}`,
+      amountMinor: null,
+      receiptNumber: null,
+      transactionDate: null,
+    };
+  }
+
+  const resultCode = data.ResultCode !== undefined ? Number(data.ResultCode) : null;
+  return {
+    pending: resultCode === null,
+    resultCode: Number.isFinite(resultCode) ? resultCode : null,
+    resultDesc: data.ResultDesc ?? null,
+    amountMinor: null, // Daraja's query response does not include the amount
+    receiptNumber: null,
+    transactionDate: null,
+  };
+}
+
 export class DarajaProvider implements PaymentProvider {
   readonly name = "daraja";
 
@@ -179,36 +272,7 @@ export class DarajaProvider implements PaymentProvider {
       };
     }
 
-    if (!res.ok) {
-      return {
-        accepted: false,
-        requestId: data.MerchantRequestID ?? null,
-        checkoutId: null,
-        customerMessage: res.status === 400 && data.errorMessage
-          ? `Safaricom rejected: ${data.errorMessage}`
-          : "Safaricom could not process this request.",
-        errorCode: codeForStatus(res.status),
-        errorMessage: data.errorMessage ?? `HTTP ${res.status}`,
-      };
-    }
-
-    if (data.ResponseCode !== "0" || !data.CheckoutRequestID) {
-      return {
-        accepted: false,
-        requestId: data.MerchantRequestID ?? null,
-        checkoutId: null,
-        customerMessage: data.ResponseDescription ?? "Request was not accepted.",
-        errorCode: "DARAJA_ERROR",
-        errorMessage: `ResponseCode=${data.ResponseCode}: ${data.ResponseDescription ?? bodyText.slice(0, 200)}`,
-      };
-    }
-
-    return {
-      accepted: true,
-      requestId: data.MerchantRequestID ?? null,
-      checkoutId: data.CheckoutRequestID,
-      customerMessage: data.CustomerMessage ?? "Request accepted. Ask the customer to enter their M-Pesa PIN.",
-    };
+    return mapStkPushHttpResponse(res, data, bodyText);
   }
 
   async queryStkPush(request: PaymentQueryRequest): Promise<PaymentQueryResponse> {
@@ -273,30 +337,7 @@ export class DarajaProvider implements PaymentProvider {
       };
     }
 
-    // 500.001.1001 = "transaction is being processed" — still pending
-    if (!res.ok) {
-      if (data.errorCode === "500.001.1001") {
-        return { pending: true, resultCode: null, resultDesc: data.errorMessage ?? null, amountMinor: null, receiptNumber: null, transactionDate: null };
-      }
-      return {
-        pending: false,
-        resultCode: null,
-        resultDesc: data.errorMessage ?? `HTTP ${res.status}`,
-        amountMinor: null,
-        receiptNumber: null,
-        transactionDate: null,
-      };
-    }
-
-    const resultCode = data.ResultCode !== undefined ? Number(data.ResultCode) : null;
-    return {
-      pending: resultCode === null,
-      resultCode: Number.isFinite(resultCode) ? resultCode : null,
-      resultDesc: data.ResultDesc ?? null,
-      amountMinor: null, // Daraja query doesn't return amount
-      receiptNumber: null,
-      transactionDate: null,
-    };
+    return mapStkQueryHttpResponse(res, data);
   }
 
   async healthCheck(): Promise<boolean> {

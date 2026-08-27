@@ -330,6 +330,17 @@ PENDING → PROCESSING → SUCCEEDED
 PENDING → CANCELLED
 ```
 
+## Idempotency & Settlement Semantics
+
+- All money-moving endpoints (`/v1/payments`, `/v1/payouts`, `/v1/refunds`)
+  accept an `Idempotency-Key` header. The same key + same payload replays the
+  ORIGINAL result; the same key + different payload returns
+  `IDEMPOTENCY_CONFLICT` and creates nothing.
+- A payment that reaches `SUCCEEDED` settles to the ledger via a durable
+  outbox worker — exactly one balanced journal per payment, retryable with
+  exponential backoff. API clients never trigger or see the settlement step
+  directly; reconciliation/ledger reads reflect it.
+
 ## Rate Limits
 
 | Limit | Scope |

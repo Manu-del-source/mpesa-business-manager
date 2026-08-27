@@ -51,7 +51,8 @@ export class LedgerValidationError extends Error {
 /** DEBIT-normal accounts: ASSET, EXPENSE */
 const DEBIT_NORMAL: AccountType[] = ["ASSET", "EXPENSE"];
 
-function isDebitNormal(type: AccountType): boolean {
+/** DEBIT-normal accounts increase with debits (ASSET, EXPENSE). Exported for tests. */
+export function isDebitNormal(type: AccountType): boolean {
   return DEBIT_NORMAL.includes(type);
 }
 
@@ -60,7 +61,11 @@ function isDebitNormal(type: AccountType): boolean {
  * For DEBIT-normal accounts: debit - credit (positive = normal)
  * For CREDIT-normal accounts: credit - debit (positive = normal)
  */
-function netBalance(type: AccountType, debitMinor: bigint, creditMinor: bigint): bigint {
+/**
+ * Net balance in the account's normal direction (positive = normal balance).
+ * Exported for tests.
+ */
+export function netBalance(type: AccountType, debitMinor: bigint, creditMinor: bigint): bigint {
   return isDebitNormal(type) ? debitMinor - creditMinor : creditMinor - debitMinor;
 }
 

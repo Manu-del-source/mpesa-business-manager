@@ -118,18 +118,39 @@ function computeBalance(entries: LedgerEntry[], accountType: AccountType): bigin
 **Normal debit accounts:** ASSET, EXPENSE (debit increases balance)
 **Normal credit accounts:** LIABILITY, EQUITY, REVENUE (credit increases balance)
 
-## Voiding Entries
+## Voiding Entries (Reversals)
 
-To void a journal transaction, update it with void metadata. The entries remain but are excluded from balance calculations:
+History is never edited or deleted. Instead, a journal transaction is
+**voided by posting a reversal** — a new journal with mirrored entries that
+nets the original to zero:
 
 ```typescript
-voidJournalTransaction(id, voidedBy, voidReason)
+reverseJournalEntry({ journalId, reversedBy, reason })
+// → { reversalId }
 ```
 
-The void is recorded on the `JournalTransaction`:
-- `voidedAt` — timestamp of void
-- `voidedBy` — actor who voided
-- `voidReason` — explanation
+The original journal is marked `voidedAt`/`voidedBy`/`voidReason`; its
+entries remain (audit trail) but are excluded from balance calculations.
+Guarantees:
+
+- a reason is required;
+- an already-voided journal cannot be reversed again;
+- a reversal journal cannot itself be reversed;
+- double reversal is blocked (unique `reversal-of:<journalId>` reference).
+
+## Automatic Settlement Posting
+
+When a payment reaches `SUCCEEDED`, the settlement worker posts exactly one
+balanced journal per payment (see ARCHITECTURE.md → Settlement):
+
+- Debit `MPESA-FLOAT` (asset in), Credit `SETTLEMENT` (revenue), both in the
+  payment's minor-unit amount and currency;
+- the journal reference `payment-settlement:<paymentId>` makes the posting
+  idempotent — concurrent or repeated settlement attempts recognize the
+  existing journal instead of posting twice;
+- the two settlement accounts are auto-provisioned per application +
+  environment and must be active; an inactive account fails the settlement
+  (retryable) rather than hiding balances from reporting.
 
 ## Trial Balance
 

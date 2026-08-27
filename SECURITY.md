@@ -133,12 +133,22 @@ Every request gets a unique `x-request-id` header for distributed tracing:
 
 ## Callback Security
 
-M-Pesa callbacks from Safaricom are secured:
+M-Pesa callbacks from Safaricom are secured (`src/lib/mpesa/callback-auth.ts`):
 
-- Shared secret token in callback URL
+- Shared secret token appended to the callback URL (`?token=…`); comparison
+  is **constant-time**
+- **Fail-closed in production**: `MPESA_CALLBACK_TOKEN` is REQUIRED — if it
+  is unset, every callback is rejected (403). Authentication never silently
+  disables itself when a production deployment forgets the token
+- In development/sandbox the token is enforced when configured and optional
+  when not (so local testing works without one)
+- Wrong or missing token → 401; the token value is never included in logs
+  or error responses
 - HTTPS required (private IP ranges rejected)
 - Always return HTTP 200 (even on errors) per Daraja contract
-- Idempotent processing (safe to receive duplicates)
+- Idempotent processing (safe to receive duplicates): a replayed callback
+  matches zero still-`PENDING` transactions and is reported as a duplicate
+  instead of overwriting a settled transaction
 
 ## Sensitive Data Handling
 

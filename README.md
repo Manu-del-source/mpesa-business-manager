@@ -126,10 +126,30 @@ Daraja credentials are normally configured **per business** in the app
 | `npm run start` | Start the production server. |
 | `npm run lint` | ESLint. |
 | `npm run typecheck` | TypeScript check. |
+| `npm test` | Unit tests (pure functions, provider adapters, parsers — no database). |
+| `npm run test:integration` | Integration tests against a real PostgreSQL server (see Testing). |
 | `npm run db:push` | Push the Prisma schema to the database. |
 | `npm run db:seed` | Seed the demo data. |
 | `npm run db:setup` | `db:push` + `db:seed`. |
 | `npm run db:studio` | Open Prisma Studio. |
+
+## Testing
+
+Unit tests (`npm test`) are hermetic — no database, no network.
+
+Integration tests (`tests/integration/`) exercise the production modules —
+payments, payouts, refunds, ledger, settlement (real outbox worker + retry
+semantics), API keys, RBAC, webhooks (real local HTTP receiver), audit —
+against a real PostgreSQL server. They create and drop a throwaway database
+per suite:
+
+```bash
+# point the runner at any PostgreSQL superuser URL
+TEST_DATABASE_ADMIN_URL="postgres://postgres@127.0.0.1:5434/postgres" npm run test:integration
+```
+
+Without `TEST_DATABASE_ADMIN_URL` (or `DATABASE_URL`) the integration suites
+report as skipped.
 
 ---
 

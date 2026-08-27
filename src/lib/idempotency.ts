@@ -34,6 +34,7 @@ export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 /** Stable JSON serialization for request hashing (sorted keys). */
 export function hashRequestPayload(payload: unknown): string {
   const stable = (value: unknown): unknown => {
+    if (value === undefined) return null; // undefined and null hash identically
     if (Array.isArray(value)) return value.map(stable);
     if (value && typeof value === "object") {
       const obj = value as Record<string, unknown>;

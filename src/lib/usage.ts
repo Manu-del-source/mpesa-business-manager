@@ -178,13 +178,13 @@ export async function getTotalUsage(
 /**
  * Get the start of the current billing period (first day of the month).
  */
-function getPeriodStart(date: Date): Date {
+export function getPeriodStart(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
 /**
  * Get the end of the current billing period (last day of the month).
  */
-function getPeriodEnd(date: Date): Date {
+export function getPeriodEnd(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
 }

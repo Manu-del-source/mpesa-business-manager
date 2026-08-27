@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma/client";
 import type { Environment } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -99,34 +100,102 @@ export async function enqueueEvent(data: OutboxData) {
 }
 
 /**
- * Claim the next batch of pending outbox records for dispatch.
- * Uses a SELECT FOR UPDATE pattern (via updateMany) to prevent
- * double-processing in concurrent workers.
+ * Claim the next batch of due outbox records for processing.
+ *
+ * Race-safe on PostgreSQL: rows are selected FOR UPDATE SKIP LOCKED inside a
+ * short transaction and flipped to PROCESSING, so concurrent workers never
+ * claim the same record (the previous find-then-update implementation could
+ * double-process). Records that exceed maxAttempts are not claimed (their
+ * terminal FAILED status is set by markFailed).
  */
 export async function claimOutboxRecords(
   applicationId: string,
   environment: Environment,
   batchSize = 10,
 ) {
-  const now = new Date();
+  return claimDueOutboxRecords({ applicationId, environment, batchSize });
+}
 
-  // Find pending records ready for processing
-  const records = await prisma.outboxRecord.findMany({
-    where: {
-      applicationId,
-      environment,
-      status: "PENDING",
-      attempts: { lt: prisma.outboxRecord.fields.maxAttempts },
-      OR: [
-        { nextRetryAt: null },
-        { nextRetryAt: { lte: now } },
-      ],
-    },
-    orderBy: { createdAt: "asc" },
-    take: batchSize,
+/**
+ * Claim due outbox records across ALL applications (worker/cron entry point).
+ * Same FOR UPDATE SKIP LOCKED semantics as claimOutboxRecords.
+ */
+export async function claimDueOutboxRecords(
+  options?: {
+    applicationId?: string;
+    environment?: Environment;
+    /** Only claim records whose eventType starts with this prefix (e.g. "settlement."). */
+    eventTypePrefix?: string;
+    batchSize?: number;
+  },
+): Promise<OutboxRecord[]> {
+  const batchSize = Math.min(Math.max(options?.batchSize ?? 10, 1), 100);
+  const appFilter = options?.applicationId
+    ? Prisma.sql`AND "applicationId" = ${options.applicationId}`
+    : Prisma.empty;
+  const envFilter = options?.environment
+    ? Prisma.sql`AND environment = ${options.environment}::"Environment"`
+    : Prisma.empty;
+  const typeFilter = options?.eventTypePrefix
+    ? Prisma.sql`AND "eventType" LIKE ${options.eventTypePrefix + "%"}`
+    : Prisma.empty;
+
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT id FROM "OutboxRecord"
+      WHERE status = 'PENDING'
+        AND attempts < "maxAttempts"
+        AND ("nextRetryAt" IS NULL OR "nextRetryAt" <= now())
+        ${appFilter}
+        ${envFilter}
+        ${typeFilter}
+      ORDER BY "createdAt" ASC
+      LIMIT ${batchSize}
+      FOR UPDATE SKIP LOCKED
+    `);
+
+    if (rows.length === 0) return [];
+
+    const ids = rows.map((r) => r.id);
+    // Guarded claim: only still-PENDING rows flip to PROCESSING.
+    const claimed = await tx.outboxRecord.updateMany({
+      where: { id: { in: ids }, status: "PENDING" },
+      data: { status: "PROCESSING" },
+    });
+    if (claimed.count === 0) return [];
+
+    return tx.outboxRecord.findMany({
+      where: { id: { in: ids }, status: "PROCESSING" },
+      orderBy: { createdAt: "asc" },
+    });
   });
+}
 
-  return records;
+/** Outbox record shape (re-exported for processors/workers). */
+export type OutboxRecord = {
+  id: string;
+  applicationId: string;
+  environment: Environment;
+  eventType: string;
+  payload: Prisma.JsonValue;
+  status: string;
+  attempts: number;
+  maxAttempts: number;
+  nextRetryAt: Date | null;
+  lastError: string | null;
+  createdAt: Date;
+  dispatchedAt: Date | null;
+};
+
+/**
+ * Release a claimed record back to PENDING (e.g. a processor crashed before
+ * finishing; the row-level lock ends with the transaction).
+ */
+export async function releaseOutboxRecord(recordId: string): Promise<void> {
+  await prisma.outboxRecord.updateMany({
+    where: { id: recordId, status: "PROCESSING" },
+    data: { status: "PENDING" },
+  });
 }
 
 /**
@@ -143,20 +212,28 @@ export async function markDispatched(recordId: string) {
 }
 
 /**
- * Mark an outbox record as failed and schedule retry with exponential backoff.
+ * Mark a claimed outbox record as failed and schedule a retry with
+ * exponential backoff. After maxAttempts the record becomes FAILED
+ * (terminal — requires manual investigation/reconciliation); the error is
+ * truncated and stored for diagnosis.
  */
 export async function markFailed(recordId: string, error: string) {
   const record = await prisma.outboxRecord.findUnique({ where: { id: recordId } });
   if (!record) return;
+  // Never overwrite a record that was already dispatched by another path.
+  if (record.status === "DISPATCHED") return record;
 
   const attempts = record.attempts + 1;
-  const maxAttempts = record.maxAttempts;
 
-  if (attempts >= maxAttempts) {
-    // Permanently failed
+  if (attempts >= record.maxAttempts) {
+    // Permanently failed — loud for operations.
     return prisma.outboxRecord.update({
       where: { id: recordId },
-      data: { status: "FAILED", attempts, lastError: error },
+      data: {
+        status: "FAILED",
+        attempts,
+        lastError: error.slice(0, 1000),
+      },
     });
   }
 
@@ -165,8 +242,9 @@ export async function markFailed(recordId: string, error: string) {
   return prisma.outboxRecord.update({
     where: { id: recordId },
     data: {
+      status: "PENDING",
       attempts,
-      lastError: error,
+      lastError: error.slice(0, 1000),
       nextRetryAt: new Date(Date.now() + delayMs),
     },
   });

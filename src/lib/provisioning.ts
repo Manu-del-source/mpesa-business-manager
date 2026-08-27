@@ -40,6 +40,36 @@ export type ProvisionedTenant = {
  * already linked, that tenant is used even if a tenant with the org's slug
  * also exists (defensive against slug collisions during renames).
  */
+
+/** Prisma unique-constraint violation (P2002) — the signature of a lost upsert race. */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "P2002"
+  );
+}
+
+/**
+ * Upserts are keyed on unique constraints, but Prisma's client-side upsert is
+ * not atomic under concurrency: two racing callers can both take the INSERT
+ * path and the loser aborts with P2002. Convergence is one retry away — the
+ * second attempt finds the winner's row — so retry instead of failing.
+ */
+async function upsertConverging<T>(operation: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await operation();
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 export async function provisionTenantForOrg(org: {
   id: string;
   name: string;
@@ -56,25 +86,29 @@ export async function provisionTenantForOrg(org: {
   }
 
   // Provisioning path: one transaction, upserts keyed on unique constraints.
-  const created = await prisma.$transaction(async (tx) => {
-    const tenant = await tx.tenant.upsert({
-      where: { slug: org.slug },
-      create: { name: org.name, slug: org.slug },
-      update: {},
-      select: { id: true, name: true, slug: true },
-    });
+  // A lost upsert race aborts the transaction with P2002 — converge by
+  // retrying (the fast path above or the upserts then find the winner's rows).
+  const created = await upsertConverging(() =>
+    prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.upsert({
+        where: { slug: org.slug },
+        create: { name: org.name, slug: org.slug },
+        update: {},
+        select: { id: true, name: true, slug: true },
+      });
 
-    // Link the org only if not already linked (guarded against races; never
-    // overwrites an existing link to a different tenant).
-    await tx.organization.updateMany({
-      where: { id: org.id, tenantId: null },
-      data: { tenantId: tenant.id },
-    });
+      // Link the org only if not already linked (guarded against races; never
+      // overwrites an existing link to a different tenant).
+      await tx.organization.updateMany({
+        where: { id: org.id, tenantId: null },
+        data: { tenantId: tenant.id },
+      });
 
-    return tenant;
-  });
+      return tenant;
+    }),
+  );
 
-  // Ensure the default application exists (idempotent upsert).
+  // Ensure the default application exists (idempotent, race-converging upsert).
   const result = await ensureTenantApplication(created.id, org.name);
   return { ...result, created: true };
 }
@@ -92,17 +126,19 @@ export async function ensureTenantApplication(
     select: { id: true, name: true, slug: true },
   });
 
-  const application = await prisma.application.upsert({
-    where: { tenantId_slug: { tenantId, slug: DEFAULT_APP_SLUG } },
-    create: {
-      tenantId,
-      name: `${tenantName} App`,
-      slug: DEFAULT_APP_SLUG,
-      description: "Default application (auto-provisioned)",
-    },
-    update: {},
-    select: { id: true, name: true, slug: true },
-  });
+  const application = await upsertConverging(() =>
+    prisma.application.upsert({
+      where: { tenantId_slug: { tenantId, slug: DEFAULT_APP_SLUG } },
+      create: {
+        tenantId,
+        name: `${tenantName} App`,
+        slug: DEFAULT_APP_SLUG,
+        description: "Default application (auto-provisioned)",
+      },
+      update: {},
+      select: { id: true, name: true, slug: true },
+    }),
+  );
 
   return { tenant, application };
 }
@@ -118,12 +154,14 @@ export async function ensureTenantMember(
   userId: string,
   role: "OWNER" | "ADMIN" | "DEVELOPER" | "FINANCE" | "VIEWER",
 ): Promise<"OWNER" | "ADMIN" | "DEVELOPER" | "FINANCE" | "VIEWER"> {
-  const member = await prisma.tenantMember.upsert({
-    where: { tenantId_userId: { tenantId, userId } },
-    create: { tenantId, userId, role },
-    update: {}, // never modify an existing membership here
-    select: { role: true },
-  });
+  const member = await upsertConverging(() =>
+    prisma.tenantMember.upsert({
+      where: { tenantId_userId: { tenantId, userId } },
+      create: { tenantId, userId, role },
+      update: {}, // never modify an existing membership here
+      select: { role: true },
+    }),
+  );
   return member.role;
 }
 
@@ -194,4 +232,23 @@ export async function backfillTenantsForOrgs(options?: {
   }
 
   return { created, skipped, membersCreated };
+}
+
+/**
+ * Lightweight tenant resolution for internal/server code that already has an
+ * orgId and doesn't need the full auth flow. Provisioning only — never grants
+ * cross-tenant access.
+ */
+export async function resolveTenantForOrg(orgId: string) {
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { id: true, name: true, slug: true },
+  });
+
+  if (!org) {
+    throw new Error(`Organization ${orgId} not found.`);
+  }
+
+  const result = await provisionTenantForOrg(org);
+  return { tenant: result.tenant, application: result.application };
 }

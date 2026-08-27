@@ -1,6 +1,8 @@
 import "server-only";
 import { createHmac, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/prisma";
+import { encryptSecret, decryptSecret, encryptionEnabled } from "@/lib/secrets";
+import { logMpesaError } from "@/lib/mpesa/log";
 import type { Environment } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -45,16 +47,26 @@ export async function createEndpoint(input: CreateEndpointInput) {
 
   const secret = `whsec_${randomBytes(32).toString("base64url")}`;
 
+  // The signing secret is ENCRYPTED AT REST (AES-256-GCM envelope — see
+  // src/lib/secrets.ts) and only decrypted in memory when signing a
+  // delivery. It is returned in plaintext exactly once, at creation.
   const endpoint = await prisma.webhookEndpoint.create({
     data: {
       applicationId: input.applicationId,
       environment: input.environment,
       url: input.url,
-      secret, // Store raw secret on creation — shown once
+      secret: encryptSecret(secret),
       events: input.events ?? [],
       description: input.description ?? null,
     },
   });
+
+  if (!encryptionEnabled()) {
+    logMpesaError("webhooks.secret_stored_unencrypted", {
+      endpointId: endpoint.id,
+      hint: "Set MPESA_CREDENTIALS_KEY to enable encryption at rest.",
+    });
+  }
 
   return {
     ok: true as const,
@@ -156,7 +168,10 @@ export async function deliverWebhook(deliveryId: string): Promise<{
     createdAt: delivery.createdAt.toISOString(),
   });
 
-  const signature = signPayload(delivery.webhookEndpoint.secret, body);
+  // The stored secret is encrypted at rest; decrypt just-in-time (legacy
+  // plaintext rows are tolerated so enabling encryption is non-breaking).
+  const secret = decryptSecret(delivery.webhookEndpoint.secret);
+  const signature = signPayload(secret, body);
 
   try {
     const res = await fetch(delivery.webhookEndpoint.url, {

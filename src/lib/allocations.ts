@@ -72,8 +72,9 @@ function divideRound(
 }
 
 /**
- * Convert a percentage (0–100, up to 4 decimal places) into exact
- * basis points as BigInt. Rejects anything not exactly representable.
+ * Convert a percentage (0–100, up to 2 decimal places) into exact basis
+ * points as BigInt (1 bp = 0.01%; 100% = 10,000 bps). Rejects anything not
+ * exactly representable — no silent rounding of split percentages.
  */
 function percentageToBasisPoints(value: number): bigint {
   if (!Number.isFinite(value) || value < 0 || value > 100) {
@@ -81,14 +82,18 @@ function percentageToBasisPoints(value: number): bigint {
       `Percentage must be between 0 and 100 (got ${value}).`,
     );
   }
-  // Validate representability: at most 4 decimal places.
-  const scaled = value * 10_000;
-  if (!Number.isInteger(scaled)) {
+  // Representability check on the DECIMAL STRING (never trust float
+  // multiplication: 33.34 * 100 === 3334.0000000000005). At most 2 decimal
+  // places — basis-point precision. 50.5 → 5050 bps; 33.333 → rejected.
+  const str = String(value);
+  if (!/^\d+(\.\d{1,2})?$/.test(str)) {
     throw new Error(
-      `Percentage ${value} has more than 4 decimal places and cannot be represented exactly.`,
+      `Percentage ${value} has more than 2 decimal places and cannot be represented exactly in basis points.`,
     );
   }
-  return BigInt(scaled);
+  // Exact conversion via the decimal string: "33.34" → 3334 bps.
+  const [intPart, decPart = ""] = str.split(".");
+  return BigInt(intPart + decPart.padEnd(2, "0"));
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +133,9 @@ export function computeAllocations(
 
   if (splits.length === 1) {
     // A single split takes everything — exact, no rounding possible.
+    // Percentage values are still validated for range/representability.
     const split = splits[0];
+    if (split.type === "percentage") percentageToBasisPoints(split.value);
     return {
       allocations: [
         {
@@ -198,11 +205,16 @@ export function computeAllocations(
   splits.forEach((split, index) => {
     const isLast = index === splits.length - 1;
     if (isLast) {
+      const requested =
+        split.type === "fixed" ? BigInt(split.value) : remaining;
       allocations.push({
         accountId: split.accountId,
         amountMinor: remaining,
         percentage: split.type === "percentage" ? String(split.value) : null,
-        roundingApplied: null,
+        roundingApplied:
+          split.type === "fixed" && requested !== remaining
+            ? `${requested} → ${remaining}`
+            : null,
       });
       remaining = 0n;
       return;

@@ -9,7 +9,7 @@ import "server-only";
  * header.
  */
 
-const SENSITIVE_KEY = /(secret|passkey|password|authorization|token|consumerkey|credential)/i;
+const SENSITIVE_KEY = /(secret|passkey|password|authorization|token|consumerkey|credential|apikey)/i;
 
 export function redact(value: unknown, depth = 0): unknown {
   if (depth > 4) return "[depth-limit]";

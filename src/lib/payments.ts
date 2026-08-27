@@ -8,6 +8,13 @@ import {
   hashRequestPayload,
   type IdempotentOutcome,
 } from "@/lib/idempotency";
+import {
+  InvalidTransitionError,
+  TransitionConflictError,
+} from "@/lib/domain-errors";
+import { enqueuePaymentSettlementTx } from "@/lib/settlement";
+
+export { InvalidTransitionError, TransitionConflictError };
 import type { Environment, PaymentDirection, PaymentStatus } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -251,28 +258,6 @@ function paymentCreateData(input: CreatePaymentInput) {
 // State transitions (concurrency-safe)
 // ---------------------------------------------------------------------------
 
-/** Thrown when a transition is invalid per the state machine. */
-export class InvalidTransitionError extends Error {
-  constructor(from: PaymentStatus, to: PaymentStatus) {
-    super(
-      `Invalid transition: ${from} → ${to}. ` +
-        `Valid transitions from ${from}: ${getValidTransitions(from).join(", ") || "none"}.`,
-    );
-    this.name = "InvalidTransitionError";
-  }
-}
-
-/** Thrown when a guarded transition lost a concurrency race. */
-export class TransitionConflictError extends Error {
-  constructor(paymentId: string, expected: PaymentStatus) {
-    super(
-      `Concurrent transition detected for payment ${paymentId}; ` +
-        `expected status ${expected} no longer current.`,
-    );
-    this.name = "TransitionConflictError";
-  }
-}
-
 const TERMINAL_STATUSES: readonly PaymentStatus[] = [
   "SUCCEEDED",
   "FAILED",
@@ -315,7 +300,7 @@ export async function transitionPayment(
   if (!payment) return null;
 
   if (!isValidTransition(payment.status, newStatus)) {
-    throw new InvalidTransitionError(payment.status, newStatus);
+    throw new InvalidTransitionError("payment", payment.status, newStatus, getValidTransitions(payment.status));
   }
 
   try {
@@ -330,7 +315,19 @@ export async function transitionPayment(
       });
 
       if (guarded.count === 0) {
-        throw new TransitionConflictError(paymentId, payment.status);
+        throw new TransitionConflictError("payment", paymentId, payment.status);
+      }
+
+      // When the payment reaches SUCCEEDED, enqueue the ledger settlement
+      // in the SAME transaction — the financial posting can never be lost,
+      // and it happens through the retryable, idempotent outbox worker
+      // (see src/lib/settlement.ts), never inline.
+      if (newStatus === "SUCCEEDED") {
+        await enqueuePaymentSettlementTx(tx, {
+          id: paymentId,
+          applicationId: payment.applicationId,
+          environment: payment.environment,
+        });
       }
 
       // Create the payment attempt in the SAME transaction, only after the

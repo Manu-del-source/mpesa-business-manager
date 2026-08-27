@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { env } from "@/lib/env";
 import { applyStkCallback, parseStkCallback } from "@/lib/mpesa/callback";
+import { authenticateCallback, extractCallbackToken } from "@/lib/mpesa/callback-auth";
 import { logMpesa, logMpesaError } from "@/lib/mpesa/log";
+import { processPendingSettlements } from "@/lib/settlement";
 
 /**
  * Safaricom Daraja STK Push callback endpoint.
@@ -16,9 +17,13 @@ import { logMpesa, logMpesaError } from "@/lib/mpesa/log";
  *   is still acknowledged — retrying will not make it valid — but it is logged
  *   loudly for investigation.
  *
- * Auth: Daraja cannot send custom headers, so the practical control is an
- * unguessable URL. Set MPESA_CALLBACK_TOKEN and the app appends `?token=...`
- * to the CallBackURL it registers; requests with the wrong token are rejected.
+ * Auth (FAIL CLOSED): Daraja cannot send custom headers, so the practical
+ * control is an unguessable URL plus a shared token in the query string.
+ *   - Production: MPESA_CALLBACK_TOKEN is REQUIRED. Without it every
+ *     callback is rejected (403) — authentication never silently disables
+ *     itself. Wrong/missing token → 401.
+ *   - Development/sandbox: token enforced when configured, accepted when not.
+ * Token comparison is constant-time. The token value is never logged.
  * For production also restrict ingress to Safaricom's published IP ranges.
  */
 
@@ -35,15 +40,16 @@ function rejected(description: string, status: number) {
 }
 
 export async function POST(request: NextRequest) {
-  // 1. Shared-secret check (only when configured).
-  if (env.mpesaCallbackToken) {
-    const token = request.nextUrl.searchParams.get("token");
-    if (token !== env.mpesaCallbackToken) {
-      logMpesaError("callback.rejected_bad_token", {
-        path: request.nextUrl.pathname,
-      });
-      return rejected("Unauthorized", 401);
-    }
+  // 1. Shared-secret check — fail closed in production (see callback-auth).
+  const auth = authenticateCallback(extractCallbackToken(request.url));
+  if (!auth.ok) {
+    // 403 for the configuration error (retrying will not help; paging needed),
+    // 401 for bad credentials. Never include the token in logs or responses.
+    logMpesaError("callback.rejected_unauthorized", {
+      reason: auth.reason,
+      path: request.nextUrl.pathname,
+    });
+    return rejected("Unauthorized", auth.reason === "MISSING_TOKEN_CONFIG" ? 403 : 401);
   }
 
   // 2. Body must be JSON.
@@ -63,30 +69,54 @@ export async function POST(request: NextRequest) {
     return ack("Malformed callback ignored");
   }
 
-  // 4. Apply (idempotently).
+  // 4. Apply (idempotently). applyStkCallback persists the provider result
+  //    AND enqueues settlement work in the same transaction; a failure here
+  //    is a genuine server-side error, so we let Safaricom retry.
+  let outcome: Awaited<ReturnType<typeof applyStkCallback>>;
   try {
-    const result = await applyStkCallback(parsed.data);
-
-    if (result.outcome === "unknown_transaction") {
-      // Could be a callback for another environment/deployment sharing the URL.
-      return ack("Unknown transaction ignored");
-    }
-    if (result.outcome === "duplicate") {
-      return ack("Already processed");
-    }
-
-    logMpesa("callback.ok", {
-      transactionId: result.transactionId,
-      status: result.status,
-    });
-    return ack("Processed");
+    outcome = await applyStkCallback(parsed.data);
   } catch (err) {
-    // A genuine server-side failure: let Safaricom retry.
     logMpesaError("callback.processing_error", {
       checkoutRequestId: parsed.data.checkoutRequestId,
       error: err instanceof Error ? err.message : String(err),
     });
     return rejected("Temporary processing error", 500);
+  }
+
+  if (outcome.outcome === "unknown_transaction") {
+    // Could be a callback for another environment/deployment sharing the URL.
+    return ack("Unknown transaction ignored");
+  }
+  if (outcome.outcome === "duplicate") {
+    // Safaricom retried a callback we already applied. The settlement work
+    // for it is already queued/done — drive any pending retries forward.
+    await drainSettlementsQuietly();
+    return ack("Already processed");
+  }
+
+  logMpesa("callback.ok", {
+    transactionId: outcome.transactionId,
+    status: outcome.status,
+  });
+
+  // 5. Best-effort immediate settlement. Settlement is idempotent and
+  //    retryable: if this pass fails (or the process dies here), the durable
+  //    outbox record keeps the work pending and the worker / reconciliation
+  //    sweep retries until it succeeds. The callback itself stays
+  //    acknowledged so Daraja does not replay it.
+  await drainSettlementsQuietly();
+
+  return ack("Processed");
+}
+
+/** Run pending settlement work, never failing the callback response. */
+async function drainSettlementsQuietly(): Promise<void> {
+  try {
+    await processPendingSettlements({ limit: 20 });
+  } catch (err) {
+    logMpesaError("settlement.drain_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

@@ -45,7 +45,8 @@ export type ApiKeyError =
 // Constants
 // ---------------------------------------------------------------------------
 
-const KEY_PREFIXES: Record<ApiKeyType, Record<Environment, string>> = {
+/** Wire-format prefixes per key type and environment (exported for tests/docs). */
+export const KEY_PREFIXES: Record<ApiKeyType, Record<Environment, string>> = {
   PUBLIC: {
     SANDBOX: "pk_test",
     LIVE: "pk_live",
@@ -69,7 +70,8 @@ export const AUTHENTICATING_KEY_TYPES: readonly ApiKeyType[] = ["SECRET"];
 // Key generation
 // ---------------------------------------------------------------------------
 
-function sha256Hash(data: string): string {
+/** SHA-256 hex digest — the at-rest form of API keys (exported for tests). */
+export function sha256Hash(data: string): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
