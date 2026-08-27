@@ -153,6 +153,8 @@ model Application {
   events          Event[]
   outboxRecords   OutboxRecord[]
   webhookEndpoints WebhookEndpoint[]
+  auditLogs        AuditLog[]
+  usageRecords     UsageRecord[]
 
   @@unique([tenantId, slug])
   @@index([tenantId])
@@ -789,6 +791,61 @@ model WebhookDelivery {
   @@index([webhookEndpointId])
   @@index([status, nextRetryAt])
   @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Audit log (append-only)
+// ---------------------------------------------------------------------------
+
+/// Append-only audit log. Every significant action (financial state change,
+/// permission grant, API key creation, etc.) is recorded here. Rows are
+/// never updated or deleted.
+model AuditLog {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  actorId       String      // Supabase auth user ID or "system"
+  actorType     String      @default("user") // "user", "api_key", "system", "webhook"
+  action        String      // "payment.created", "payment.succeeded", "api_key.created", etc.
+  targetType    String      // "Payment", "Payout", "ApiKey", "WebhookEndpoint", etc.
+  targetId      String      // ID of the affected entity
+  changes       Json?       // Before/after diff for updates (null for creates/deletes)
+  metadata      Json?       // Correlation IDs, IP, user agent, request ID, etc.
+  createdAt     DateTime    @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, action])
+  @@index([applicationId, targetType, targetId])
+  @@index([applicationId, actorId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Usage / Billing
+// ---------------------------------------------------------------------------
+
+/// Usage record for metering API calls and financial operations.
+/// Aggregated periodically for billing.
+model UsageRecord {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  metric        String      // "payments.initiated", "payments.succeeded", "api_calls", etc.
+  quantity      Int         @default(1)
+  metadata      Json?       // Additional context (amount, provider, etc.)
+  recordedAt    DateTime    @default(now())
+  periodStart   DateTime    // Start of the billing period this record belongs to
+  periodEnd     DateTime    // End of the billing period
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([applicationId, environment, metric])
+  @@index([applicationId, periodStart])
+  @@index([recordedAt])
 }
 
 // ---------------------------------------------------------------------------

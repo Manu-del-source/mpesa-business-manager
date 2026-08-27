@@ -1,15 +1,36 @@
-import { NextResponse } from "next/server";
-
 /**
- * GET /v1/health
+ * GET /v1/health — Public health check endpoint.
  *
- * Public health check endpoint. No authentication required.
- * Returns basic platform status info.
+ * Returns platform health status including database connectivity.
+ *
+ * @module app/api/v1/health/route
  */
+
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+
 export async function GET() {
-  return NextResponse.json({
-    status: "ok",
-    version: "v1",
-    timestamp: new Date().toISOString(),
-  });
+  const checks: Record<string, string> = {};
+
+  // Database check
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    checks.database = "ok";
+  } catch {
+    checks.database = "error";
+  }
+
+  const status = Object.values(checks).every((s) => s === "ok")
+    ? "healthy"
+    : "degraded";
+
+  return NextResponse.json(
+    {
+      status,
+      version: process.env.npm_package_version ?? "unknown",
+      timestamp: new Date().toISOString(),
+      checks,
+    },
+    { status: status === "healthy" ? 200 : 503 },
+  );
 }
