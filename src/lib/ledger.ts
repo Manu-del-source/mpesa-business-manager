@@ -1,7 +1,8 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import type { AccountType, Environment, LedgerEntryType } from "@/generated/prisma";
+import { isValidCurrency } from "@/lib/money";
+import type { AccountType, Environment, LedgerEntryType } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +36,14 @@ export type AccountBalance = {
   currency: string;
 };
 
+/** Raised when a journal violates double-entry invariants. */
+export class LedgerValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LedgerValidationError";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Account normal balance helpers
 // ---------------------------------------------------------------------------
@@ -61,42 +70,83 @@ function netBalance(type: AccountType, debitMinor: bigint, creditMinor: bigint):
 
 /**
  * Validate a journal entry before posting:
- * - At least 2 entries
- * - All amounts > 0
- * - Sum of debits == Sum of credits
- * - No duplicate account+type combinations
- * - Accounts exist and are active
+ *  - At least 2 entries
+ *  - All amounts > 0
+ *  - Sum of debits == Sum of credits (double-entry invariant)
+ *  - Accounts exist, are active, and belong to this application + environment
+ *  - Every entry's currency matches its account's currency
+ *  - A journal is single-currency (no FX mixing — FX accounting is future work)
+ *
+ * Runs INSIDE the posting transaction so the checks and the writes see the
+ * same database state.
  */
-async function validateJournalEntry(
+async function validateJournalEntryTx(
+  tx: Prisma.TransactionClient,
   input: PostJournalInput,
-): Promise<{ valid: true } | { valid: false; error: string }> {
+): Promise<void> {
   if (input.entries.length < 2) {
-    return { valid: false, error: "Journal entry must have at least 2 entries." };
+    throw new LedgerValidationError("Journal entry must have at least 2 entries.");
   }
 
-  let totalDebits = BigInt(0);
-  let totalCredits = BigInt(0);
+  let totalDebits = 0n;
+  let totalCredits = 0n;
+  let journalCurrency: string | null = null;
 
   for (const entry of input.entries) {
     if (entry.amountMinor <= 0n) {
-      return { valid: false, error: `Amount must be positive for account ${entry.accountId}.` };
+      throw new LedgerValidationError(
+        `Amount must be positive for account ${entry.accountId}.`,
+      );
     }
 
-    // Verify account exists
-    const account = await prisma.account.findUnique({
+    const currency = entry.currency ?? "KES";
+    if (!isValidCurrency(currency)) {
+      throw new LedgerValidationError(
+        `Invalid currency ${JSON.stringify(currency)} on account ${entry.accountId}.`,
+      );
+    }
+
+    const account = await tx.account.findUnique({
       where: { id: entry.accountId },
     });
     if (!account) {
-      return { valid: false, error: `Account ${entry.accountId} not found.` };
+      throw new LedgerValidationError(`Account ${entry.accountId} not found.`);
     }
     if (!account.active) {
-      return { valid: false, error: `Account ${account.code} (${account.name}) is not active.` };
+      throw new LedgerValidationError(
+        `Account ${account.code} (${account.name}) is not active.`,
+      );
     }
     if (account.applicationId !== input.applicationId) {
-      return { valid: false, error: `Account ${account.code} belongs to a different application.` };
+      throw new LedgerValidationError(
+        `Account ${account.code} belongs to a different application.`,
+      );
     }
     if (account.environment !== input.environment) {
-      return { valid: false, error: `Account ${account.code} is in a different environment.` };
+      throw new LedgerValidationError(
+        `Account ${account.code} is in a different environment.`,
+      );
+    }
+
+    // CURRENCY INVARIANT: an entry posted to an account must use that
+    // account's currency. The balance of an M-Pesa float account in KES can
+    // never silently absorb a USD entry.
+    if (currency !== account.currency) {
+      throw new LedgerValidationError(
+        `Entry currency ${currency} does not match account ${account.code} ` +
+          `currency ${account.currency}.`,
+      );
+    }
+
+    // Single currency per journal — mixing currencies inside one journal
+    // would require FX accounting, which the platform does not implement.
+    if (journalCurrency === null) {
+      journalCurrency = currency;
+    } else if (journalCurrency !== currency) {
+      throw new LedgerValidationError(
+        `Journal mixes currencies (${journalCurrency} and ${currency}). ` +
+          "Multi-currency journals require FX accounting and are not supported.",
+      );
     }
 
     if (entry.type === "DEBIT") {
@@ -107,13 +157,10 @@ async function validateJournalEntry(
   }
 
   if (totalDebits !== totalCredits) {
-    return {
-      valid: false,
-      error: `Debits (${totalDebits}) do not equal credits (${totalCredits}).`,
-    };
+    throw new LedgerValidationError(
+      `Debits (${totalDebits}) do not equal credits (${totalCredits}).`,
+    );
   }
-
-  return { valid: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -124,17 +171,20 @@ async function validateJournalEntry(
  * Post a balanced journal entry to the ledger. This is the primary write
  * operation for the financial core.
  *
- * Returns the created JournalTransaction with its entries.
+ * The ledger is APPEND-ONLY: there is no update or delete path for
+ * finalized entries. Corrections are made by posting a reversal journal
+ * (see reverseJournalEntry). Validation and the writes run in a single
+ * transaction, so an unbalanced journal can never be committed.
  */
 export async function postJournalEntry(input: PostJournalInput) {
-  // Validate before any writes
-  const validation = await validateJournalEntry(input);
-  if (!validation.valid) {
-    throw new Error(`Validation failed: ${validation.error}`);
+  if (!input.description?.trim()) {
+    throw new LedgerValidationError("Journal description is required.");
   }
 
-  // Atomic transaction: create JournalTransaction + all LedgerEntry rows
-  const journal = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
+    // Validate inside the transaction.
+    await validateJournalEntryTx(tx, input);
+
     const journalTx = await tx.journalTransaction.create({
       data: {
         applicationId: input.applicationId,
@@ -144,7 +194,6 @@ export async function postJournalEntry(input: PostJournalInput) {
       },
     });
 
-    // Create all ledger entries
     await tx.ledgerEntry.createMany({
       data: input.entries.map((entry) => ({
         journalTransactionId: journalTx.id,
@@ -158,39 +207,81 @@ export async function postJournalEntry(input: PostJournalInput) {
 
     return journalTx;
   });
-
-  return journal;
 }
 
 /**
- * Void a journal entry by marking it voided. This does NOT delete the
- * entries — they remain for audit purposes. The entries are excluded from
- * balance calculations via the voidedAt check.
+ * Reverse a journal transaction by posting a compensating journal with
+ * inverted debits/credits. The ORIGINAL entries are never modified or
+ * deleted — both journals remain in the audit trail, and balances reflect
+ * the net effect. This is the only correction mechanism for the ledger.
+ *
+ * The reversal references the original via `reference` and carries the
+ * same environment/application scoping. Idempotent-safe: pass the original
+ * journal id — reversing an already-reversed journal is rejected.
  */
-export async function voidJournalEntry(
-  journalId: string,
-  voidedBy: string,
-  voidReason: string,
-) {
-  const existing = await prisma.journalTransaction.findUnique({
-    where: { id: journalId },
-  });
-
-  if (!existing) {
-    throw new Error("Journal transaction not found.");
+export async function reverseJournalEntry(params: {
+  journalId: string;
+  reversedBy: string;
+  reason: string;
+}): Promise<{ reversalId: string }> {
+  if (!params.reason?.trim()) {
+    throw new LedgerValidationError("A reversal reason is required.");
   }
 
-  if (existing.voidedAt) {
-    throw new Error("Journal transaction is already voided.");
-  }
+  return prisma.$transaction(async (tx) => {
+    const original = await tx.journalTransaction.findUnique({
+      where: { id: params.journalId },
+      include: { entries: true },
+    });
 
-  return prisma.journalTransaction.update({
-    where: { id: journalId },
-    data: {
-      voidedAt: new Date(),
-      voidedBy,
-      voidReason,
-    },
+    if (!original) {
+      throw new LedgerValidationError("Journal transaction not found.");
+    }
+    if (original.voidedAt) {
+      throw new LedgerValidationError("Journal transaction is already voided.");
+    }
+    if (original.reference?.startsWith("reversal-of:")) {
+      throw new LedgerValidationError("Reversal journals cannot be reversed.");
+    }
+
+    // Guard against double reversal: a journal with reference
+    // "reversal-of:<originalId>" must not already exist.
+    const existingReversal = await tx.journalTransaction.findFirst({
+      where: {
+        applicationId: original.applicationId,
+        reference: `reversal-of:${original.id}`,
+      },
+      select: { id: true },
+    });
+    if (existingReversal) {
+      throw new LedgerValidationError(
+        `Journal ${original.id} has already been reversed by ${existingReversal.id}.`,
+      );
+    }
+
+    const reversal = await tx.journalTransaction.create({
+      data: {
+        applicationId: original.applicationId,
+        environment: original.environment,
+        description: `Reversal of "${original.description}": ${params.reason}`,
+        reference: `reversal-of:${original.id}`,
+      },
+    });
+
+    // Inverted entries — every original debit becomes a credit and vice
+    // versa. Balanced by construction.
+    await tx.ledgerEntry.createMany({
+      data: original.entries.map((entry) => ({
+        journalTransactionId: reversal.id,
+        accountId: entry.accountId,
+        type: entry.type === "DEBIT" ? ("CREDIT" as const) : ("DEBIT" as const),
+        amountMinor: entry.amountMinor,
+        currency: entry.currency,
+        description: `Reversal (${entry.type === "DEBIT" ? "credit" : "debit"}) of ${entry.amountMinor} ${entry.currency}`,
+      })),
+    });
+
+    return { reversalId: reversal.id };
   });
 }
 
@@ -211,18 +302,6 @@ export async function getAccountBalance(
 
   if (!account) return null;
 
-  // Sum debits and credits from non-voided journal entries
-  const aggregations = await prisma.ledgerEntry.aggregate({
-    where: {
-      accountId,
-      journalTransaction: { voidedAt: null },
-    },
-    _sum: { amountMinor: true },
-    _count: true,
-  });
-
-  // We need to separate debits and credits — aggregate doesn't group by type
-  // so we do two queries
   const [debitSum, creditSum] = await Promise.all([
     prisma.ledgerEntry.aggregate({
       where: {
@@ -242,8 +321,8 @@ export async function getAccountBalance(
     }),
   ]);
 
-  const debitMinor = debitSum._sum.amountMinor ?? BigInt(0);
-  const creditMinor = creditSum._sum.amountMinor ?? BigInt(0);
+  const debitMinor = debitSum._sum.amountMinor ?? 0n;
+  const creditMinor = creditSum._sum.amountMinor ?? 0n;
 
   return {
     accountId: account.id,
@@ -266,7 +345,7 @@ export async function getAccountBalances(
   environment: Environment,
 ): Promise<AccountBalance[]> {
   const accounts = await prisma.account.findMany({
-    where: { applicationId, environment, active: true },
+    where: { applicationId, environment },
     orderBy: { code: "asc" },
   });
 
@@ -292,8 +371,8 @@ export async function getAccountBalances(
       }),
     ]);
 
-    const debitMinor = debitSum._sum.amountMinor ?? BigInt(0);
-    const creditMinor = creditSum._sum.amountMinor ?? BigInt(0);
+    const debitMinor = debitSum._sum.amountMinor ?? 0n;
+    const creditMinor = creditSum._sum.amountMinor ?? 0n;
 
     balances.push({
       accountId: account.id,
@@ -343,8 +422,8 @@ export async function verifyLedgerBalance(
     }),
   ]);
 
-  const totalDebits = debitTotal._sum.amountMinor ?? BigInt(0);
-  const totalCredits = creditTotal._sum.amountMinor ?? BigInt(0);
+  const totalDebits = debitTotal._sum.amountMinor ?? 0n;
+  const totalCredits = creditTotal._sum.amountMinor ?? 0n;
 
   if (totalDebits === totalCredits) {
     return { balanced: true };
@@ -362,6 +441,22 @@ export async function verifyLedgerBalance(
 // Account management
 // ---------------------------------------------------------------------------
 
+/** Raised when account creation parameters are invalid or cross-scope. */
+export class AccountValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AccountValidationError";
+  }
+}
+
+/**
+ * Create an account in the chart of accounts.
+ *
+ * SCOPE INVARIANT: when `parentId` is given, the parent account must belong
+ * to the SAME application and environment — a tenant/application can never
+ * attach its account to another tenant/application's account, and SANDBOX
+ * can never attach to LIVE (or vice versa).
+ */
 export async function createAccount(params: {
   applicationId: string;
   environment: Environment;
@@ -372,6 +467,31 @@ export async function createAccount(params: {
   currency?: string;
   description?: string;
 }) {
+  const currency = params.currency ?? "KES";
+  if (!isValidCurrency(currency)) {
+    throw new AccountValidationError(
+      `Currency must be a 3-letter ISO code (e.g. "KES"), got ${JSON.stringify(currency)}.`,
+    );
+  }
+
+  if (params.parentId) {
+    const parent = await prisma.account.findUnique({
+      where: { id: params.parentId },
+      select: { id: true, applicationId: true, environment: true, code: true },
+    });
+    if (!parent) {
+      throw new AccountValidationError(`Parent account ${params.parentId} not found.`);
+    }
+    if (
+      parent.applicationId !== params.applicationId ||
+      parent.environment !== params.environment
+    ) {
+      throw new AccountValidationError(
+        `Parent account ${parent.code} belongs to a different application or environment.`,
+      );
+    }
+  }
+
   return prisma.account.create({
     data: {
       applicationId: params.applicationId,
@@ -380,7 +500,7 @@ export async function createAccount(params: {
       name: params.name,
       type: params.type,
       parentId: params.parentId ?? null,
-      currency: params.currency ?? "KES",
+      currency,
       description: params.description ?? null,
     },
   });

@@ -1,8 +1,14 @@
 import "server-only";
-import { createHash } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import type { Environment, PaymentDirection, PaymentStatus } from "@/generated/prisma";
+import { isValidCurrency } from "@/lib/money";
+import {
+  createIdempotencyRecordTx,
+  runIdempotent,
+  hashRequestPayload,
+  type IdempotentOutcome,
+} from "@/lib/idempotency";
+import type { Environment, PaymentDirection, PaymentStatus } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,8 +29,15 @@ export type CreatePaymentInput = {
 };
 
 export type PaymentResult =
-  | { ok: true; payment: PaymentView }
+  | { ok: true; payment: PaymentView; replayed?: boolean }
   | { ok: false; error: string; code: string };
+
+/** Returned when the same idempotency key is reused with a different payload. */
+export type IdempotencyConflict = {
+  ok: false;
+  error: string;
+  code: "IDEMPOTENCY_CONFLICT";
+};
 
 export type PaymentView = {
   id: string;
@@ -43,12 +56,54 @@ export type PaymentView = {
 };
 
 // ---------------------------------------------------------------------------
+// Amount policy
+// ---------------------------------------------------------------------------
+
+/**
+ * Platform-wide per-payment limit (KES 150,000 = 15,000,000 minor units),
+ * matching the M-Pesa per-transaction collection limit. Enforced before any
+ * record is created so internal state never diverges from a provider charge.
+ */
+export const MAX_PAYMENT_MINOR = 15_000_000n;
+
+/**
+ * Validate a payment amount (positive, within the platform limit) and
+ * currency. Returns null when valid.
+ */
+export function validatePaymentAmount(
+  amountMinor: bigint,
+  currency?: string,
+): { error: string; code: string } | null {
+  if (amountMinor <= 0n) {
+    return { error: "Amount must be positive.", code: "INVALID_AMOUNT" };
+  }
+  if (amountMinor > MAX_PAYMENT_MINOR) {
+    return {
+      error: "Amount must not exceed KSh 150,000 per transaction.",
+      code: "INVALID_AMOUNT",
+    };
+  }
+  if (currency !== undefined && !isValidCurrency(currency)) {
+    return {
+      error: 'Currency must be a 3-letter ISO code (e.g. "KES").',
+      code: "INVALID_CURRENCY",
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // State machine
 // ---------------------------------------------------------------------------
 
 /**
  * Valid state transitions for a Payment.
  * Each key is the current status; the value is the set of allowed next statuses.
+ *
+ * PENDING    → PROCESSING (provider accepted) | CANCELLED (before dispatch)
+ * PROCESSING → SUCCEEDED | FAILED | CANCELLED
+ * SUCCEEDED  → REFUNDED (fully refunded; refund records carry the amounts)
+ * FAILED / CANCELLED / REFUNDED are terminal.
  */
 const VALID_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   PENDING: ["PROCESSING", "CANCELLED"],
@@ -59,189 +114,187 @@ const VALID_TRANSITIONS: Record<PaymentStatus, PaymentStatus[]> = {
   REFUNDED: [],
 };
 
-/**
- * Check whether a state transition is valid.
- */
+/** Check whether a state transition is valid. */
 export function isValidTransition(from: PaymentStatus, to: PaymentStatus): boolean {
   return VALID_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
-/**
- * Get all valid transitions from a given status.
- */
+/** Get all valid transitions from a given status. */
 export function getValidTransitions(status: PaymentStatus): PaymentStatus[] {
   return VALID_TRANSITIONS[status] ?? [];
 }
 
 // ---------------------------------------------------------------------------
-// Idempotency
+// Payment creation (idempotent, concurrency-safe)
 // ---------------------------------------------------------------------------
 
-function hashRequest(body: unknown): string {
-  return createHash("sha256").update(JSON.stringify(body ?? null)).digest("hex");
-}
-
 /**
- * Check for an existing idempotent response. Returns the cached response
- * if the key exists and the request body matches.
+ * Stable representation of the logical request used for idempotency hashing.
+ * The amount is normalized to its decimal string so "1549" (string) and
+ * 1549 (number) hash identically.
  */
-async function checkIdempotency(
-  applicationId: string,
-  environment: Environment,
-  key: string,
-  requestBody: unknown,
-): Promise<{ status: number; body: unknown } | null> {
-  const record = await prisma.idempotencyRecord.findUnique({
-    where: {
-      applicationId_environment_key: { applicationId, environment, key },
-    },
-  });
-
-  if (!record) return null;
-
-  // Check expiry
-  if (record.expiresAt < new Date()) {
-    await prisma.idempotencyRecord.delete({
-      where: { id: record.id },
-    });
-    return null;
-  }
-
-  // Check request body matches
-  const requestHash = hashRequest(requestBody);
-  if (record.requestHash !== requestHash) {
-    // Different payload with same key — this is a conflict
-    return null; // Caller should handle this
-  }
-
+function idempotentRequestView(input: CreatePaymentInput) {
   return {
-    status: record.responseStatus,
-    body: record.responseBody,
+    applicationId: input.applicationId,
+    environment: input.environment,
+    direction: input.direction ?? "INCOMING",
+    amountMinor: input.amountMinor.toString(),
+    currency: input.currency ?? "KES",
+    phone: input.phone ?? null,
+    email: input.email ?? null,
+    customerName: input.customerName ?? null,
+    description: input.description ?? null,
+    reference: input.reference ?? null,
   };
 }
-
-/**
- * Store an idempotent response for future retries.
- */
-async function storeIdempotency(
-  applicationId: string,
-  environment: Environment,
-  key: string,
-  requestBody: unknown,
-  responseStatus: number,
-  responseBody: unknown,
-): Promise<void> {
-  const requestHash = hashRequest(requestBody);
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h TTL
-
-  await prisma.idempotencyRecord.upsert({
-    where: {
-      applicationId_environment_key: { applicationId, environment, key },
-    },
-    create: {
-      applicationId,
-      environment,
-      key,
-      requestHash,
-      responseStatus,
-      responseBody: responseBody as Prisma.InputJsonValue,
-      expiresAt,
-    },
-    update: {
-      requestHash,
-      responseStatus,
-      responseBody: responseBody as Prisma.InputJsonValue,
-      expiresAt,
-    },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Payment creation
-// ---------------------------------------------------------------------------
 
 /**
  * Create a new payment. This is the entry point for all payment initiation.
  *
- * - If an idempotency key is provided and already processed, returns the
- *   cached response.
- * - Creates the Payment as PENDING (intent-before-network pattern).
- * - Returns the payment for the caller to dispatch to a provider.
+ * Idempotency (when `idempotencyKey` is provided):
+ *   - same key + logically equivalent request → the ORIGINAL result is
+ *     returned (flagged `replayed`)
+ *   - same key + different payload → IDEMPOTENCY_CONFLICT, no second payment
+ *   - concurrent duplicates → the database unique constraint on
+ *     IdempotencyRecord(applicationId, environment, key) serializes the
+ *     requests; exactly one payment is created
+ *
+ * The payment and its idempotency record are written in ONE transaction, so
+ * a crash can never leave a payment without its replay record (or vice
+ * versa).
  */
-export async function createPayment(input: CreatePaymentInput): Promise<PaymentResult> {
-  // Validate amount
-  if (input.amountMinor <= 0n) {
-    return { ok: false, error: "Amount must be positive.", code: "INVALID_AMOUNT" };
+export async function createPayment(
+  input: CreatePaymentInput,
+): Promise<PaymentResult | IdempotencyConflict> {
+  const amountError = validatePaymentAmount(input.amountMinor, input.currency);
+  if (amountError) {
+    return { ok: false, error: amountError.error, code: amountError.code };
   }
 
-  // Max KES 150,000 (15,000,000 minor units)
-  if (input.amountMinor > 15_000_000n) {
-    return {
-      ok: false,
-      error: "Amount must not exceed KSh 150,000.",
-      code: "INVALID_AMOUNT",
-    };
-  }
-
-  // Check idempotency
-  if (input.idempotencyKey) {
-    const cached = await checkIdempotency(
-      input.applicationId,
-      input.environment,
-      input.idempotencyKey,
-      input,
-    );
-    if (cached) {
-      // Return cached response — this is a retry
-      return cached.body as PaymentResult;
-    }
-  }
-
-  // Create payment as PENDING
-  const payment = await prisma.payment.create({
-    data: {
-      applicationId: input.applicationId,
-      environment: input.environment,
-      direction: input.direction ?? "INCOMING",
-      status: "PENDING",
-      amountMinor: input.amountMinor,
-      currency: input.currency ?? "KES",
-      phone: input.phone ?? null,
-      email: input.email ?? null,
-      customerName: input.customerName ?? null,
-      description: input.description ?? null,
-      idempotencyKey: input.idempotencyKey ?? null,
-      reference: input.reference ?? null,
-    },
-  });
-
-  const result: PaymentResult = {
-    ok: true,
-    payment: formatPayment(payment),
+  // Normalize once: everything downstream (including the idempotency hash)
+  // uses the same shape.
+  const normalized: CreatePaymentInput = {
+    ...input,
+    direction: input.direction ?? "INCOMING",
+    currency: input.currency ?? "KES",
   };
 
-  // Store idempotent response
-  if (input.idempotencyKey) {
-    await storeIdempotency(
-      input.applicationId,
-      input.environment,
-      input.idempotencyKey,
-      input,
-      201,
-      result,
-    );
+  if (!normalized.idempotencyKey) {
+    const payment = await prisma.payment.create({
+      data: paymentCreateData(normalized),
+    });
+    return { ok: true, payment: formatPayment(payment) };
   }
 
-  return result;
+  const outcome: IdempotentOutcome<{ ok: true; payment: PaymentView }> =
+    await runIdempotent(
+      {
+        applicationId: normalized.applicationId,
+        environment: normalized.environment,
+        key: normalized.idempotencyKey,
+      },
+      idempotentRequestView(normalized),
+      async (tx) => {
+        const payment = await tx.payment.create({
+          data: paymentCreateData(normalized),
+        });
+        const result = { ok: true as const, payment: formatPayment(payment) };
+        const { applicationId, environment, idempotencyKey } = normalized;
+        await createIdempotencyRecordTx(
+          tx,
+          {
+            applicationId,
+            environment,
+            key: idempotencyKey!,
+          },
+          hashRequestPayload(idempotentRequestView(normalized)),
+          201,
+          result,
+        );
+        return { responseStatus: 201, responseBody: result };
+      },
+    );
+
+  switch (outcome.type) {
+    case "fresh":
+      return outcome.result;
+    case "replay":
+      return { ...outcome.result, replayed: true };
+    case "conflict":
+      return {
+        ok: false,
+        code: "IDEMPOTENCY_CONFLICT",
+        error:
+          "This idempotency key was already used with a different request payload.",
+      };
+  }
+}
+
+function paymentCreateData(input: CreatePaymentInput) {
+  return {
+    applicationId: input.applicationId,
+    environment: input.environment,
+    direction: input.direction ?? "INCOMING",
+    status: "PENDING" as const,
+    amountMinor: input.amountMinor,
+    currency: input.currency ?? "KES",
+    phone: input.phone ?? null,
+    email: input.email ?? null,
+    customerName: input.customerName ?? null,
+    description: input.description ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
+    reference: input.reference ?? null,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// State transitions
+// State transitions (concurrency-safe)
 // ---------------------------------------------------------------------------
 
+/** Thrown when a transition is invalid per the state machine. */
+export class InvalidTransitionError extends Error {
+  constructor(from: PaymentStatus, to: PaymentStatus) {
+    super(
+      `Invalid transition: ${from} → ${to}. ` +
+        `Valid transitions from ${from}: ${getValidTransitions(from).join(", ") || "none"}.`,
+    );
+    this.name = "InvalidTransitionError";
+  }
+}
+
+/** Thrown when a guarded transition lost a concurrency race. */
+export class TransitionConflictError extends Error {
+  constructor(paymentId: string, expected: PaymentStatus) {
+    super(
+      `Concurrent transition detected for payment ${paymentId}; ` +
+        `expected status ${expected} no longer current.`,
+    );
+    this.name = "TransitionConflictError";
+  }
+}
+
+const TERMINAL_STATUSES: readonly PaymentStatus[] = [
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED",
+  "REFUNDED",
+];
+
 /**
- * Transition a payment to a new status. Validates the state machine
- * and creates a PaymentAttempt record.
+ * Transition a payment to a new status — CONCURRENCY-SAFE.
+ *
+ * The update is guarded:
+ *
+ *   UPDATE Payment SET status = NEW
+ *   WHERE id = PAYMENT_ID AND status = EXPECTED_PREVIOUS_STATUS
+ *
+ * If zero rows are affected, another writer changed the state first (or the
+ * transition is invalid) and the transaction aborts — a payment can never be
+ * transitioned twice, and impossible transitions (SUCCEEDED → PENDING,
+ * FAILED → SUCCEEDED, …) are rejected by the state machine.
+ *
+ * The PaymentAttempt record is created in the same transaction as the
+ * guarded update, so attempts and state always agree.
  */
 export async function transitionPayment(
   paymentId: string,
@@ -262,47 +315,59 @@ export async function transitionPayment(
   if (!payment) return null;
 
   if (!isValidTransition(payment.status, newStatus)) {
-    throw new Error(
-      `Invalid transition: ${payment.status} → ${newStatus}. ` +
-      `Valid transitions from ${payment.status}: ${getValidTransitions(payment.status).join(", ") || "none"}.`,
-    );
+    throw new InvalidTransitionError(payment.status, newStatus);
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    // Update payment status
-    const updated = await tx.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: newStatus,
-        processedAt: ["SUCCEEDED", "FAILED", "CANCELLED", "REFUNDED"].includes(newStatus)
-          ? new Date()
-          : undefined,
-      },
-    });
-
-    // Create payment attempt if provider data provided
-    if (attemptData) {
-      await tx.paymentAttempt.create({
+  try {
+    return await prisma.$transaction(async (tx) => {
+      // Guarded update: only succeeds when the status is still what we read.
+      const guarded = await tx.payment.updateMany({
+        where: { id: paymentId, status: payment.status },
         data: {
-          paymentId,
-          provider: attemptData.provider,
           status: newStatus,
-          providerRequestId: attemptData.providerRequestId ?? null,
-          providerCheckoutId: attemptData.providerCheckoutId ?? null,
-          providerResponse: attemptData.providerResponse as Prisma.InputJsonValue ?? null,
-          errorCode: attemptData.errorCode ?? null,
-          errorMessage: attemptData.errorMessage ?? null,
-          amountMinor: payment.amountMinor,
-          currency: payment.currency,
-          completedAt: new Date(),
+          processedAt: TERMINAL_STATUSES.includes(newStatus) ? new Date() : undefined,
         },
       });
+
+      if (guarded.count === 0) {
+        throw new TransitionConflictError(paymentId, payment.status);
+      }
+
+      // Create the payment attempt in the SAME transaction, only after the
+      // guarded update won the race.
+      if (attemptData) {
+        await tx.paymentAttempt.create({
+          data: {
+            paymentId,
+            provider: attemptData.provider,
+            status: newStatus,
+            providerRequestId: attemptData.providerRequestId ?? null,
+            providerCheckoutId: attemptData.providerCheckoutId ?? null,
+            providerResponse: (attemptData.providerResponse ?? null) as Prisma.InputJsonValue,
+            errorCode: attemptData.errorCode ?? null,
+            errorMessage: attemptData.errorMessage ?? null,
+            amountMinor: payment.amountMinor,
+            currency: payment.currency,
+            completedAt: new Date(),
+          },
+        });
+      }
+
+      const updated = await tx.payment.findUniqueOrThrow({
+        where: { id: paymentId },
+      });
+      return formatPayment(updated);
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      // Prisma wraps errors thrown inside interactive transactions as
+      // P2004 ("transaction failed") with the original error attached.
+      const original = err.meta?.cause ?? err;
+      if (original instanceof InvalidTransitionError) throw original;
+      if (original instanceof TransitionConflictError) throw original;
     }
-
-    return updated;
-  });
-
-  return formatPayment(result);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -322,17 +387,59 @@ export async function getPayment(
   return payment ? formatPayment(payment) : null;
 }
 
+/** Opaque cursor for keyset pagination: base64url("createdAt|id"). */
+function encodePaymentCursor(createdAt: Date, id: string): string {
+  return Buffer.from(`${createdAt.toISOString()}|${id}`, "utf8").toString("base64url");
+}
+
+export type CursorParseResult =
+  | { ok: true; createdAt: Date; id: string }
+  | { ok: false };
+
+export function decodePaymentCursor(cursor: string): CursorParseResult {
+  try {
+    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+    const separator = decoded.lastIndexOf("|");
+    if (separator <= 0) return { ok: false };
+    const iso = decoded.slice(0, separator);
+    const id = decoded.slice(separator + 1);
+    const createdAt = new Date(iso);
+    if (Number.isNaN(createdAt.getTime()) || !id) return { ok: false };
+    return { ok: true, createdAt, id };
+  } catch {
+    return { ok: false };
+  }
+}
+
+export type ListPaymentsResult =
+  | { ok: true; data: PaymentView[]; nextCursor: string | null }
+  | { ok: false; error: string; code: "INVALID_CURSOR" | "INVALID_LIMIT" };
+
 /**
- * List payments for an application, with optional status filter.
+ * List payments for an application + environment, newest first.
+ *
+ * Ordering is deterministic: (createdAt DESC, id DESC) — id is the unique
+ * tiebreaker so rows that share a timestamp are never skipped or duplicated.
+ *
+ * Cursors are opaque and keyset-based. A cursor that does not resolve to a
+ * payment IN THE SAME application + environment is rejected (a cursor from
+ * another tenant/application must not influence this page boundary).
  */
 export async function listPayments(
   applicationId: string,
   environment: Environment,
   options?: { status?: PaymentStatus; limit?: number; cursor?: string },
-): Promise<{ data: PaymentView[]; nextCursor: string | null }> {
-  const limit = Math.min(options?.limit ?? 50, 100);
+): Promise<ListPaymentsResult> {
+  const limit = options?.limit ?? 50;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return {
+      ok: false,
+      code: "INVALID_LIMIT",
+      error: "limit must be an integer between 1 and 100.",
+    };
+  }
 
-  const where: Record<string, unknown> = {
+  const where: Prisma.PaymentWhereInput = {
     applicationId,
     environment,
   };
@@ -342,26 +449,56 @@ export async function listPayments(
   }
 
   if (options?.cursor) {
-    const cursorPayment = await prisma.payment.findUnique({
-      where: { id: options.cursor },
-      select: { createdAt: true },
-    });
-    if (cursorPayment) {
-      where.createdAt = { lt: cursorPayment.createdAt };
+    const parsed = decodePaymentCursor(options.cursor);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        code: "INVALID_CURSOR",
+        error: "Malformed pagination cursor.",
+      };
     }
+
+    // The cursor must resolve to a payment in THIS scope — otherwise a
+    // cursor minted in another tenant/application would leak its position.
+    const cursorPayment = await prisma.payment.findFirst({
+      where: {
+        id: parsed.id,
+        createdAt: parsed.createdAt,
+        applicationId,
+        environment,
+      },
+      select: { id: true },
+    });
+    if (!cursorPayment) {
+      return {
+        ok: false,
+        code: "INVALID_CURSOR",
+        error: "Cursor does not belong to this application/environment.",
+      };
+    }
+
+    // Keyset predicate: strictly before (createdAt, id) in the sort order.
+    where.OR = [
+      { createdAt: { lt: parsed.createdAt } },
+      { createdAt: parsed.createdAt, id: { lt: parsed.id } },
+    ];
   }
 
   const payments = await prisma.payment.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1,
   });
 
   const hasMore = payments.length > limit;
   const data = hasMore ? payments.slice(0, limit) : payments;
-  const nextCursor = hasMore ? data[data.length - 1]?.id ?? null : null;
+  const last = data[data.length - 1];
+  const nextCursor = hasMore && last
+    ? encodePaymentCursor(last.createdAt, last.id)
+    : null;
 
   return {
+    ok: true,
     data: data.map(formatPayment),
     nextCursor,
   };

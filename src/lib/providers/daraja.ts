@@ -9,7 +9,6 @@
  */
 
 import { env } from "@/lib/env";
-import { prisma } from "@/lib/prisma";
 import {
   checkCallbackUrl,
   darajaBaseUrl,
@@ -18,7 +17,8 @@ import {
 } from "@/lib/mpesa/config";
 import { getAccessToken, invalidateAccessToken } from "@/lib/mpesa/oauth";
 import { darajaTimestamp, stkPassword } from "@/lib/mpesa/daraja";
-import { DarajaError, codeForStatus, toDarajaError } from "@/lib/mpesa/errors";
+import { codeForStatus, toDarajaError } from "@/lib/mpesa/errors";
+import { darajaAmountConstraint } from "@/lib/money";
 import type {
   PaymentProvider,
   ProviderCapabilities,
@@ -110,8 +110,22 @@ export class DarajaProvider implements PaymentProvider {
     const timestamp = darajaTimestamp();
     const password = stkPassword(config.shortcode, config.passkey, timestamp);
 
-    // Convert minor units to whole KES (Daraja doesn't accept decimals)
-    const amountKes = Math.max(1, Math.round(Number(request.amountMinor) / 100));
+    // Daraja only accepts whole shillings. Convert the exact minor-unit
+    // amount and REJECT anything that is not exactly representable —
+    // silently rounding what the customer is charged is never acceptable.
+    const amountCheck = darajaAmountConstraint(request.amountMinor);
+    if (!amountCheck.ok) {
+      return {
+        accepted: false,
+        requestId: null,
+        checkoutId: null,
+        customerMessage:
+          "Amount must be a whole number of Kenyan shillings (max KSh 150,000).",
+        errorCode: "AMOUNT_NOT_SUPPORTED",
+        errorMessage: amountCheck.error,
+      };
+    }
+    const amountKes = amountCheck.amountKes;
 
     const body = {
       BusinessShortCode: config.shortcode,

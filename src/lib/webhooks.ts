@@ -1,7 +1,7 @@
 import "server-only";
 import { createHmac, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import type { Environment } from "@/generated/prisma";
+import type { Environment } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types

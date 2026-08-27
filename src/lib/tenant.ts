@@ -4,7 +4,13 @@ import { cookies } from "next/headers";
 import { isDemoMode } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { createClient as createSupabaseClient } from "@/lib/supabase/server";
-import type { Environment, TenantRole } from "@/generated/prisma";
+import {
+  ensureTenantApplication,
+  ensureTenantMember,
+  provisionTenantForOrg,
+} from "@/lib/provisioning";
+import { tenantRoleForOrgRole } from "@/lib/permissions";
+import type { Environment, TenantRole } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,20 +38,19 @@ export type AppContext = {
 
 /**
  * Extended context that adds infrastructure-tenant information on top of
- * the existing AppContext. Phase 1 introduces the Tenant → Application
- * hierarchy; later phases will add permissions, API keys, etc.
+ * the existing AppContext.
  *
  * Existing code continues to work with `AppContext` alone. New code should
  * prefer `TenantContext` when it needs tenant-scoped infrastructure access.
  */
 export type TenantContext = AppContext & {
-  /** Infrastructure tenant (the platform customer). */
+  /** Infrastructure tenant (the platform customer), authorized via TenantMember. */
   tenant: {
     id: string;
     name: string;
     slug: string;
   };
-  /** Default application for this tenant. Created on first access. */
+  /** Default application for this tenant. */
   application: {
     id: string;
     name: string;
@@ -53,9 +58,29 @@ export type TenantContext = AppContext & {
   };
   /** Active environment. Defaults to SANDBOX for safety. */
   environment: Environment;
-  /** Tenant-level role mapped from TenantMember.role. */
+  /** Tenant-level role loaded from the persisted TenantMember row. */
   tenantRole: TenantRole;
 };
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/**
+ * The authenticated user has no membership relationship with the requested
+ * tenant. Mapped to HTTP 403 by API routes.
+ */
+export class TenantAccessDeniedError extends Error {
+  constructor(
+    public readonly userId: string,
+    public readonly tenantSlug: string,
+  ) {
+    super(
+      "You are not a member of the requested tenant. Access denied.",
+    );
+    this.name = "TenantAccessDeniedError";
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Demo-mode constants
@@ -66,7 +91,22 @@ export const DEMO_USER_ID = "demo-user";
 export const DEMO_ORG_SLUG = "kijani-fresh-foods";
 export const ACTIVE_TENANT_COOKIE = "mbm_active_tenant";
 export const ACTIVE_ENVIRONMENT_COOKIE = "mbm_active_environment";
-const DEMO_APP_SLUG = "default-app";
+
+const VALID_ENVIRONMENTS: readonly Environment[] = ["SANDBOX", "LIVE"];
+
+/**
+ * Validate a raw cookie value as an Environment. Anything other than the
+ * exact enum members is ignored (treated as unset) so a tampered cookie can
+ * never leak an arbitrary string into Prisma where clauses.
+ */
+export function parseEnvironmentCookie(
+  raw: string | undefined | null,
+): Environment | undefined {
+  if (!raw) return undefined;
+  return VALID_ENVIRONMENTS.includes(raw as Environment)
+    ? (raw as Environment)
+    : undefined;
+}
 
 // ---------------------------------------------------------------------------
 // User resolution
@@ -109,101 +149,6 @@ export async function requireUser(): Promise<SessionUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/signin");
   return user;
-}
-
-// ---------------------------------------------------------------------------
-// Tenant + Application auto-provisioning
-// ---------------------------------------------------------------------------
-
-/**
- * Ensure a Tenant exists for the given Organization and return it.
- * Creates a Tenant + default Application if the org has no tenantId yet
- * (happens during the transition from single-tenant to multi-tenant).
- */
-async function ensureTenantForOrg(
-  orgId: string,
-  orgName: string,
-  orgSlug: string,
-): Promise<{
-  tenant: { id: string; name: string; slug: string };
-  application: { id: string; name: string; slug: string };
-}> {
-  // Check if org already has a tenant
-  const org = await prisma.organization.findUnique({
-    where: { id: orgId },
-    select: { tenantId: true },
-  });
-
-  if (org?.tenantId) {
-    // Tenant exists — ensure a default application exists
-    let app = await prisma.application.findFirst({
-      where: { tenantId: org.tenantId },
-    });
-    if (!app) {
-      app = await prisma.application.create({
-        data: {
-          tenantId: org.tenantId,
-          name: `${orgName} App`,
-          slug: DEMO_APP_SLUG,
-          description: "Default application",
-        },
-      });
-    }
-    const tenant = await prisma.tenant.findUniqueOrThrow({
-      where: { id: org.tenantId },
-      select: { id: true, name: true, slug: true },
-    });
-    return { tenant, application: app };
-  }
-
-  // No tenant yet — create one (1:1 with org during transition)
-  const tenant = await prisma.tenant.create({
-    data: {
-      name: orgName,
-      slug: orgSlug,
-    },
-    select: { id: true, name: true, slug: true },
-  });
-
-  // Link org to tenant
-  await prisma.organization.update({
-    where: { id: orgId },
-    data: { tenantId: tenant.id },
-  });
-
-  // Create default application
-  const app = await prisma.application.create({
-    data: {
-      tenantId: tenant.id,
-      name: `${orgName} App`,
-      slug: DEMO_APP_SLUG,
-      description: "Default application",
-    },
-  });
-
-  return { tenant, application: app };
-}
-
-/**
- * Ensure a TenantMember exists for the given user in the tenant.
- * Returns the tenant role (defaults to OWNER for the org creator).
- */
-async function ensureTenantMember(
-  tenantId: string,
-  userId: string,
-  orgRole: "OWNER" | "ADMIN" | "STAFF",
-): Promise<TenantRole> {
-  // Map legacy org role → tenant role
-  const tenantRole: TenantRole =
-    orgRole === "OWNER" ? "OWNER" : orgRole === "ADMIN" ? "ADMIN" : "VIEWER";
-
-  await prisma.tenantMember.upsert({
-    where: { tenantId_userId: { tenantId, userId } },
-    create: { tenantId, userId, role: tenantRole },
-    update: {}, // Don't downgrade role on subsequent calls
-  });
-
-  return tenantRole;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +200,7 @@ export async function requireAppContext(): Promise<AppContext> {
   });
 
   if (!member) {
+    // Self-provisioning for a brand-new user's own organization.
     const org = await prisma.organization.create({
       data: {
         name: user.name ? `${user.name.split(" ")[0]}'s Business` : "My Business",
@@ -278,64 +224,116 @@ export async function requireAppContext(): Promise<AppContext> {
 }
 
 // ---------------------------------------------------------------------------
-// TenantContext (new — Phase 1)
+// TenantContext (authorization-critical)
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the full TenantContext: user → org → tenant → application.
+ * Core tenant-context resolution — no cookies, no redirects. This function is
+ * the authorization boundary for tenant-scoped access and is covered directly
+ * by regression tests.
  *
- * This extends `requireAppContext()` with infrastructure-tenant information.
- * For new code that needs tenant-scoped infrastructure access (API keys,
- * provider connections, etc.), use this instead of `requireAppContext()`.
+ * Flow:
+ *   authenticated user (appCtx)
+ *     ↓
+ *   requested tenant (activeTenantSlug when present, else the user's org)
+ *     ↓
+ *   verify TenantMember for (user, tenant)  ← NEVER created as a side effect
+ *     ↓
+ *   resolve tenant context (tenant + default application + environment)
  *
- * During the transition period this auto-provisions Tenant + Application
- * for existing Orgs that don't have one yet.
+ * Failure modes:
+ *   - TenantAccessDeniedError: the requested tenant exists but the user has
+ *     no membership. Callers map this to HTTP 403.
+ *   - Stale/unknown tenant slug: falls back to the user's own organization's
+ *     tenant (no information leak — the fallback only ever uses the org the
+ *     user is already a member of).
+ */
+export async function resolveTenantContext(input: {
+  appCtx: AppContext;
+  activeTenantSlug?: string | null;
+  activeEnvironment?: Environment | null;
+}): Promise<TenantContext> {
+  const { appCtx } = input;
+  const environment = input.activeEnvironment ?? "SANDBOX";
+
+  if (input.activeTenantSlug) {
+    const requested = await prisma.tenant.findUnique({
+      where: { slug: input.activeTenantSlug },
+      select: { id: true, name: true, slug: true },
+    });
+
+    if (requested) {
+      // CRITICAL: verify an existing membership. Never create one here —
+      // selecting a tenant must never grant access to it.
+      const member = await prisma.tenantMember.findUnique({
+        where: {
+          tenantId_userId: { tenantId: requested.id, userId: appCtx.user.id },
+        },
+        select: { role: true },
+      });
+
+      if (!member) {
+        throw new TenantAccessDeniedError(appCtx.user.id, requested.slug);
+      }
+
+      const { application } = await ensureTenantApplication(
+        requested.id,
+        requested.name,
+      );
+      return {
+        ...appCtx,
+        tenant: requested,
+        application,
+        environment,
+        tenantRole: member.role,
+      };
+    }
+    // Unknown/stale slug → fall through to the user's own org tenant.
+  }
+
+  // Org-based resolution: the user is an OrganizationMember (guaranteed by
+  // requireAppContext), so provisioning a TenantMember for the org's own
+  // tenant is legitimate provisioning — the role is mapped from the org role
+  // on first creation and never modified afterwards.
+  const tenant = (await provisionTenantForOrg(appCtx.org)).tenant;
+  const tenantRole = await ensureTenantMember(
+    tenant.id,
+    appCtx.user.id,
+    tenantRoleForOrgRole(appCtx.role),
+  );
+  const { application } = await ensureTenantApplication(tenant.id, tenant.name);
+
+  return {
+    ...appCtx,
+    tenant,
+    application,
+    environment,
+    tenantRole,
+  };
+}
+
+/**
+ * Resolve the full TenantContext for the current request.
+ *
+ * Reads the active-tenant / active-environment cookies, then delegates to
+ * resolveTenantContext() which verifies membership. Throws
+ * TenantAccessDeniedError (→ 403) when the cookie names a tenant the user
+ * does not belong to.
  */
 export async function requireTenantContext(): Promise<TenantContext> {
   const appCtx = await requireAppContext();
   const store = await cookies();
 
-  // Check for explicit tenant selection via cookie (for multi-tenant users)
-  const activeTenantSlug = store.get(ACTIVE_TENANT_COOKIE)?.value;
-  const activeEnv = store.get(ACTIVE_ENVIRONMENT_COOKIE)?.value as Environment | undefined;
-
-  let tenantResult: { tenant: { id: string; name: string; slug: string }; application: { id: string; name: string; slug: string } };
-
-  if (activeTenantSlug) {
-    // Resolve by slug from cookie — user explicitly chose this tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { slug: activeTenantSlug },
-      select: { id: true, name: true, slug: true },
-    });
-    if (tenant) {
-      let app = await prisma.application.findFirst({ where: { tenantId: tenant.id } });
-      if (!app) {
-        app = await prisma.application.create({
-          data: { tenantId: tenant.id, name: `${tenant.name} App`, slug: DEMO_APP_SLUG },
-        });
-      }
-      tenantResult = { tenant, application: app };
-    } else {
-      // Cookie points to a deleted tenant — fall back to org-based resolution
-      tenantResult = await ensureTenantForOrg(appCtx.orgId, appCtx.org.name, appCtx.org.slug);
-    }
-  } else {
-    // Default: resolve from org (auto-provisions if needed)
-    tenantResult = await ensureTenantForOrg(appCtx.orgId, appCtx.org.name, appCtx.org.slug);
-  }
-
-  const tenantRole = await ensureTenantMember(
-    tenantResult.tenant.id,
-    appCtx.user.id,
-    appCtx.role,
+  const activeTenantSlug = store.get(ACTIVE_TENANT_COOKIE)?.value || null;
+  const activeEnvironment = parseEnvironmentCookie(
+    store.get(ACTIVE_ENVIRONMENT_COOKIE)?.value,
   );
 
-  return {
-    ...appCtx,
-    ...tenantResult,
-    environment: activeEnv ?? "SANDBOX" as Environment,
-    tenantRole,
-  };
+  return resolveTenantContext({
+    appCtx,
+    activeTenantSlug,
+    activeEnvironment,
+  });
 }
 
 /**
@@ -352,36 +350,19 @@ export async function requireTenantContextWithEnvironment(
 
 /**
  * Lightweight tenant resolution for internal/server code that already
- * has an orgId and doesn't need the full auth flow.
+ * has an orgId and doesn't need the full auth flow. Provisioning only —
+ * never grants cross-tenant access.
  */
 export async function resolveTenantForOrg(orgId: string) {
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { tenantId: true, name: true, slug: true },
-  });
-
-  if (!org?.tenantId) {
-    return ensureTenantForOrg(orgId, org?.name ?? "Unknown", org?.slug ?? "unknown");
-  }
-
-  const tenant = await prisma.tenant.findUniqueOrThrow({
-    where: { id: org.tenantId },
     select: { id: true, name: true, slug: true },
   });
 
-  let app = await prisma.application.findFirst({
-    where: { tenantId: tenant.id },
-  });
-  if (!app) {
-    app = await prisma.application.create({
-      data: {
-        tenantId: tenant.id,
-        name: `${org.name} App`,
-        slug: DEMO_APP_SLUG,
-        description: "Default application",
-      },
-    });
+  if (!org) {
+    throw new Error(`Organization ${orgId} not found.`);
   }
 
-  return { tenant, application: app };
+  const result = await provisionTenantForOrg(org);
+  return { tenant: result.tenant, application: result.application };
 }

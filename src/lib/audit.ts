@@ -10,7 +10,7 @@
 import "server-only";
 
 import { prisma } from "./prisma";
-import type { Application, Environment } from "../generated/prisma";
+import type { Environment, Prisma } from "../generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,8 +59,8 @@ export async function logAudit(entry: AuditLogEntry): Promise<void> {
       action: entry.action,
       targetType: entry.targetType,
       targetId: entry.targetId,
-      changes: entry.changes ?? undefined,
-      metadata: entry.metadata ?? undefined,
+      changes: (entry.changes ?? undefined) as Prisma.InputJsonValue,
+      metadata: (entry.metadata ?? undefined) as Prisma.InputJsonValue,
     },
   });
 }

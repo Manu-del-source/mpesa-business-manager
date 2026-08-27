@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { Environment } from "@/generated/prisma";
+import type { Environment } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types

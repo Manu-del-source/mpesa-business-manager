@@ -10,7 +10,7 @@
 import "server-only";
 
 import { prisma } from "./prisma";
-import type { Environment } from "../generated/prisma";
+import type { Environment, Prisma } from "../generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,7 +71,7 @@ export async function recordUsage(
       environment: options.environment,
       metric: options.metric,
       quantity: options.quantity ?? 1,
-      metadata: options.metadata ?? undefined,
+      metadata: (options.metadata ?? undefined) as Prisma.InputJsonValue,
       periodStart,
       periodEnd,
     },
@@ -95,7 +95,7 @@ export async function recordUsageSimple(
       environment: options.environment,
       metric: options.metric,
       quantity: options.quantity ?? 1,
-      metadata: options.metadata ?? undefined,
+      metadata: (options.metadata ?? undefined) as Prisma.InputJsonValue,
       periodStart: getPeriodStart(now),
       periodEnd: getPeriodEnd(now),
     },

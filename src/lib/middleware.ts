@@ -1,8 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyApiKey, type VerifiedKey } from "@/lib/api-keys";
 import { prisma } from "@/lib/prisma";
-import type { Environment, TenantRole } from "@/generated/prisma";
-import { resolvePermissions, type Permission } from "@/lib/rbac";
+import { isValidPermission, type Permission } from "@/lib/permissions";
+import type { Environment } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,9 +15,9 @@ export type RequestContext = {
   tenant: { id: string; name: string; slug: string };
   /** Resolved application. */
   application: { id: string; name: string; slug: string };
-  /** Active environment (from the API key). */
+  /** Active environment (from the API key — keys are environment-bound). */
   environment: Environment;
-  /** Resolved permissions for this key's scopes. */
+  /** Resolved permissions for this key's scopes (registry-validated). */
   permissions: Permission[];
   /** Correlation ID for request tracing. */
   requestId: string;
@@ -41,7 +41,7 @@ export function apiError(error: ApiError): NextResponse {
   );
 }
 
-const ERRORS = {
+export const ERRORS = {
   UNAUTHORIZED: { code: "UNAUTHORIZED", message: "Invalid or missing API key.", status: 401 },
   FORBIDDEN: { code: "FORBIDDEN", message: "Insufficient permissions.", status: 403 },
   NOT_FOUND: { code: "NOT_FOUND", message: "Resource not found.", status: 404 },
@@ -65,7 +65,7 @@ function generateRequestId(): string {
 
 /**
  * Extract the API key from the Authorization header.
- * Supports: `Bearer sk_test_...` or `Bearer pk_test_...`
+ * Supports: `Bearer sk_test_...`
  */
 function extractBearerKey(request: NextRequest): string | null {
   const auth = request.headers.get("authorization");
@@ -81,12 +81,13 @@ function extractBearerKey(request: NextRequest): string | null {
 }
 
 /**
- * Resolve the tenant and application from an API key.
+ * Resolve the tenant and application from an API key. The application and
+ * its tenant come from the DATABASE, keyed by the key's applicationId —
+ * client-supplied tenant/application identifiers are never trusted.
  */
 async function resolveContextFromKey(
   verified: VerifiedKey,
 ): Promise<Omit<RequestContext, "apiKey" | "permissions" | "requestId"> | null> {
-  // Get application → tenant
   const app = await prisma.application.findUnique({
     where: { id: verified.applicationId },
     include: { tenant: { select: { id: true, name: true, slug: true } } },
@@ -128,23 +129,36 @@ export async function withApiKeyAuth(
     return apiError(ERRORS.UNAUTHORIZED);
   }
 
-  const verified = await verifyApiKey(rawKey, {
-    requiredEnvironment: options?.requiredEnvironment,
-    requiredScopes: options?.requiredScopes,
-  });
+  let verified: VerifiedKey | null;
+  try {
+    verified = await verifyApiKey(rawKey, {
+      requiredEnvironment: options?.requiredEnvironment,
+      requiredScopes: options?.requiredScopes,
+    });
+  } catch {
+    // Verification must fail closed — a database failure never becomes a
+    // "no key required" situation, nor a crash with a 500 stack trace.
+    return apiError(ERRORS.INTERNAL);
+  }
 
   if (!verified) {
     return apiError(ERRORS.UNAUTHORIZED);
   }
 
-  const resolved = await resolveContextFromKey(verified);
-  if (!resolved) {
+  let resolved: Omit<RequestContext, "apiKey" | "permissions" | "requestId"> | null;
+  try {
+    resolved = await resolveContextFromKey(verified);
+  } catch {
     return apiError(ERRORS.INTERNAL);
   }
+  if (!resolved) {
+    // Key points at an application that no longer exists.
+    return apiError(ERRORS.UNAUTHORIZED);
+  }
 
-  // Resolve permissions from key scopes (or all permissions for the key)
-  // For now, scopes on the key ARE the permissions
-  const permissions = verified.scopes as Permission[];
+  // Only registry-valid permissions enter the request context. Unknown
+  // scope strings stored on a key can never satisfy a permission check.
+  const permissions = verified.scopes.filter(isValidPermission);
 
   return {
     apiKey: verified,

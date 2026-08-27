@@ -1,222 +1,138 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { TenantRole } from "@/generated/prisma";
+import type { Prisma, TenantRole } from "@/generated/prisma/client";
+import {
+  ALL_PERMISSIONS,
+  DEFAULT_ROLE_PERMISSIONS,
+  TENANT_ROLES,
+  hasAllPermissions,
+  isValidPermission,
+  type Permission,
+} from "@/lib/permissions";
 
 // ---------------------------------------------------------------------------
-// Permission constants
+// Re-exports — the registry in src/lib/permissions.ts is the single source of
+// truth. Consumers can import from either module.
 // ---------------------------------------------------------------------------
 
-/**
- * All permissions in the system. Organized by domain:
- *   `<domain>:<action>`
- *
- * These are the canonical strings stored in the Permission table and
- * checked by authorization helpers.
- */
-export const PERMISSIONS = {
-  // Payments
-  "payments:create": "payments:create",
-  "payments:read": "payments:read",
-  "payments:refund": "payments:refund",
-  "payments:cancel": "payments:cancel",
-
-  // Payouts
-  "payouts:create": "payouts:create",
-  "payouts:read": "payouts:read",
-  "payouts:approve": "payouts:approve",
-
-  // Ledger
-  "ledger:read": "ledger:read",
-  "ledger:post": "ledger:post",
-
-  // Reconciliation
-  "reconciliation:read": "reconciliation:read",
-  "reconciliation:run": "reconciliation:run",
-
-  // Webhooks
-  "webhooks:read": "webhooks:read",
-  "webhooks:manage": "webhooks:manage",
-
-  // API Keys
-  "api-keys:read": "api-keys:read",
-  "api-keys:manage": "api-keys:manage",
-
-  // Provider connections
-  "providers:read": "providers:read",
-  "providers:manage": "providers:manage",
-
-  // Settings
-  "settings:read": "settings:read",
-  "settings:manage": "settings:manage",
-
-  // Members
-  "members:read": "members:read",
-  "members:manage": "members:manage",
-
-  // Audit
-  "audit:read": "audit:read",
-
-  // Usage
-  "usage:read": "usage:read",
-
-  // POS (legacy business manager)
-  "pos:sales": "pos:sales",
-  "pos:inventory": "pos:inventory",
-  "pos:customers": "pos:customers",
-  "pos:expenses": "pos:expenses",
-  "pos:reports": "pos:reports",
-} as const;
-
-export type Permission = keyof typeof PERMISSIONS;
-
-// ---------------------------------------------------------------------------
-// Default role → permission mapping
-// ---------------------------------------------------------------------------
-
-/**
- * Built-in role mappings. These are applied during seed and when a new
- * TenantMember is created. The DB Role/Permission tables can override
- * these defaults per-tenant, but the defaults ensure correct behavior
- * even without seeding.
- */
-const DEFAULT_ROLE_PERMISSIONS: Record<TenantRole, Permission[]> = {
-  OWNER: Object.keys(PERMISSIONS) as Permission[],
-
-  ADMIN: [
-    "payments:create",
-    "payments:read",
-    "payments:refund",
-    "payments:cancel",
-    "payouts:create",
-    "payouts:read",
-    "payouts:approve",
-    "ledger:read",
-    "ledger:post",
-    "reconciliation:read",
-    "reconciliation:run",
-    "webhooks:read",
-    "webhooks:manage",
-    "api-keys:read",
-    "api-keys:manage",
-    "providers:read",
-    "providers:manage",
-    "settings:read",
-    "settings:manage",
-    "members:read",
-    "members:manage",
-    "audit:read",
-    "usage:read",
-    "pos:sales",
-    "pos:inventory",
-    "pos:customers",
-    "pos:expenses",
-    "pos:reports",
-  ],
-
-  DEVELOPER: [
-    "payments:create",
-    "payments:read",
-    "ledger:read",
-    "reconciliation:read",
-    "webhooks:read",
-    "webhooks:manage",
-    "api-keys:read",
-    "api-keys:manage",
-    "providers:read",
-    "audit:read",
-    "pos:sales",
-    "pos:inventory",
-    "pos:customers",
-  ],
-
-  FINANCE: [
-    "payments:create",
-    "payments:read",
-    "payments:refund",
-    "payouts:create",
-    "payouts:read",
-    "payouts:approve",
-    "ledger:read",
-    "ledger:post",
-    "reconciliation:read",
-    "reconciliation:run",
-    "audit:read",
-    "usage:read",
-    "pos:sales",
-    "pos:reports",
-  ],
-
-  VIEWER: [
-    "payments:read",
-    "ledger:read",
-    "reconciliation:read",
-    "audit:read",
-    "usage:read",
-    "pos:sales",
-    "pos:inventory",
-    "pos:customers",
-    "pos:reports",
-  ],
-};
+export {
+  PERMISSIONS,
+  ALL_PERMISSIONS,
+  DEFAULT_ROLE_PERMISSIONS,
+  TENANT_ROLES,
+  isValidPermission,
+  hasPermission,
+  hasAllPermissions,
+  hasAnyPermission,
+} from "@/lib/permissions";
+export type { Permission, TenantRoleName } from "@/lib/permissions";
 
 // ---------------------------------------------------------------------------
 // Permission resolution
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve permissions for a TenantRole. Checks the DB Role/Permission
- * tables first; falls back to built-in defaults if the tables aren't
- * seeded yet.
+ * Prisma "known error" codes that mean the Role/Permission tables do not
+ * exist yet (bootstrap condition on a database that has not been migrated or
+ * seeded). These are the ONLY database conditions for which we fall back to
+ * the built-in defaults — every other database failure must DENY access.
  */
-export async function resolvePermissions(role: TenantRole): Promise<Permission[]> {
-  // Try DB-backed roles first
-  try {
-    const dbRole = await prisma.role.findUnique({
-      where: { name: role },
-      include: { permissions: true },
-    });
+const MISSING_TABLE_PRISMA_CODES = new Set(["P2021", "P2022"]);
 
-    if (dbRole && dbRole.permissions.length > 0) {
-      return dbRole.permissions.map((p) => p.name as Permission);
-    }
-  } catch {
-    // Tables might not exist yet — fall through to defaults
+function isMissingTableError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    typeof (err as { code?: unknown }).code === "string" &&
+    MISSING_TABLE_PRISMA_CODES.has((err as { code: string }).code)
+  );
+}
+
+/**
+ * Resolve the effective permissions for a TenantRole.
+ *
+ * Checks the DB Role/Permission tables first; falls back to the built-in
+ * defaults ONLY when the tables do not exist yet (bootstrap).
+ *
+ * FAILS CLOSED: any unexpected database error (connection failure, timeout,
+ * corruption…) is rethrown so the caller denies access. Authorization must
+ * never silently fall back to broad default permissions when the database is
+ * unhealthy.
+ */
+export async function resolvePermissions(
+  role: TenantRole,
+): Promise<Permission[]> {
+  if (!(TENANT_ROLES as readonly string[]).includes(role)) {
+    // Unknown role — no permissions at all.
+    return [];
   }
 
-  // Fall back to built-in defaults
-  return DEFAULT_ROLE_PERMISSIONS[role] ?? [];
+  let dbRole: { permissions: { name: string }[] } | null = null;
+  try {
+    dbRole = await prisma.role.findUnique({
+      where: { name: role },
+      select: { permissions: { select: { name: true } } },
+    });
+  } catch (err) {
+    if (isMissingTableError(err)) {
+      // Bootstrap condition: tables don't exist yet. Using the built-in
+      // defaults here is safe because the defaults are the only definition
+      // that has ever applied to this database.
+      return [...DEFAULT_ROLE_PERMISSIONS[role]];
+    }
+    // Unexpected database failure — DENY (fail closed).
+    throw new Error(
+      `Permission resolution failed for role ${role}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  if (dbRole && dbRole.permissions.length > 0) {
+    // Only known permission names enter the result — a stale/invalid row in
+    // the join table can never grant an unknown permission.
+    return dbRole.permissions
+      .map((p) => p.name)
+      .filter(isValidPermission)
+      .sort();
+  }
+
+  // Role row missing or has no permissions granted: use built-in defaults.
+  // (seedRolesAndPermissions replaces the stored set with the defaults, so
+  // a healthy database converges to the canonical grants.)
+  return [...DEFAULT_ROLE_PERMISSIONS[role]];
 }
 
 /**
- * Fast synchronous check: does the given permission set include the
- * required permission? Used after resolvePermissions() to avoid
- * repeated DB calls.
+ * Resolve permissions and require a specific one. Throws (denies) when the
+ * permission is absent or the database lookup fails.
  */
-export function hasPermission(
-  permissions: Permission[],
-  required: Permission,
-): boolean {
-  return permissions.includes(required);
+export async function requirePermissions(
+  role: TenantRole,
+  required: Permission | Permission[],
+): Promise<Permission[]> {
+  const permissions = await resolvePermissions(role);
+  const needed = Array.isArray(required) ? required : [required];
+  if (!hasAllPermissions(permissions, needed)) {
+    throw new PermissionDeniedError(role, needed, permissions);
+  }
+  return permissions;
 }
 
-/**
- * Check multiple permissions (all must be present).
- */
-export function hasAllPermissions(
-  permissions: Permission[],
-  required: Permission[],
-): boolean {
-  return required.every((p) => permissions.includes(p));
-}
-
-/**
- * Check any of the given permissions (at least one must be present).
- */
-export function hasAnyPermission(
-  permissions: Permission[],
-  required: Permission[],
-): boolean {
-  return required.some((p) => permissions.includes(p));
+/** Thrown when a role lacks a required permission (or resolution failed). */
+export class PermissionDeniedError extends Error {
+  constructor(
+    public readonly role: TenantRole,
+    public readonly required: Permission[],
+    public readonly granted: Permission[],
+  ) {
+    super(
+      `Role ${role} is not authorized for ${required.join(", ")} ` +
+        `(granted: ${granted.join(", ") || "none"}).`,
+    );
+    this.name = "PermissionDeniedError";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -224,60 +140,59 @@ export function hasAnyPermission(
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the Permission and Role tables with default data.
- * Safe to re-run (idempotent).
+ * Seed the Permission and Role tables with the canonical data from
+ * src/lib/permissions.ts. Safe to re-run: each role's permission set is
+ * REPLACED with the current definition (so removing a permission from the
+ * registry actually revokes it on the next seed run).
  */
 export async function seedRolesAndPermissions(): Promise<{
   permissions: number;
   roles: number;
   rolePermissions: number;
 }> {
-  let permissionsCreated = 0;
-  let rolesCreated = 0;
-  let rolePermissionsCreated = 0;
-
-  // Upsert all permissions
-  for (const name of Object.keys(PERMISSIONS)) {
-    const result = await prisma.permission.upsert({
-      where: { name },
-      create: { name },
-      update: {},
-    });
-    if (result) permissionsCreated++;
-  }
-
-  // Upsert all roles with their default permissions
-  for (const [roleName, permNames] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
-    const role = await prisma.role.upsert({
-      where: { name: roleName as TenantRole },
-      create: { name: roleName as TenantRole },
-      update: {},
-    });
-
-    // Connect permissions to role
-    for (const permName of permNames) {
-      const perm = await prisma.permission.findUnique({
-        where: { name: permName },
+  return prisma.$transaction(async (tx) => {
+    // 1. Upsert all permissions
+    for (const name of ALL_PERMISSIONS) {
+      await tx.permission.upsert({
+        where: { name },
+        create: { name },
+        update: {},
       });
-      if (perm) {
-        await prisma.role.update({
-          where: { id: role.id },
-          data: {
-            permissions: {
-              connect: { id: perm.id },
-            },
-          },
-        });
-        rolePermissionsCreated++;
-      }
     }
 
-    rolesCreated++;
-  }
+    // 2. Upsert each role and REPLACE its permission set with the canonical
+    //    one (set: [] then connect — guarantees removal of stale grants).
+    let rolePermissionsCreated = 0;
+    for (const roleName of TENANT_ROLES) {
+      const role = await tx.role.upsert({
+        where: { name: roleName },
+        create: { name: roleName },
+        update: {},
+      });
 
-  return {
-    permissions: permissionsCreated,
-    roles: rolesCreated,
-    rolePermissions: rolePermissionsCreated,
-  };
+      const perms = await tx.permission.findMany({
+        where: { name: { in: [...DEFAULT_ROLE_PERMISSIONS[roleName]] } },
+        select: { id: true },
+      });
+
+      await tx.role.update({
+        where: { id: role.id },
+        data: {
+          permissions: {
+            set: perms.map((p) => ({ id: p.id })),
+          },
+        },
+      });
+      rolePermissionsCreated += perms.length;
+    }
+
+    return {
+      permissions: ALL_PERMISSIONS.length,
+      roles: TENANT_ROLES.length,
+      rolePermissions: rolePermissionsCreated,
+    };
+  });
 }
+
+// Type-only re-export so callers can name transaction client types.
+export type { Prisma };

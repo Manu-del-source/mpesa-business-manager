@@ -1,8 +1,7 @@
 import { type NextRequest } from "next/server";
 import { withApiKeyAuth, requirePermission, apiError } from "@/lib/middleware";
-import { createAccount, listAccounts, getAccountBalance, getAccountBalances } from "@/lib/ledger";
+import { createAccount, listAccounts, getAccountBalances } from "@/lib/ledger";
 import { z } from "zod";
-import type { AccountType } from "@/generated/prisma";
 
 const createAccountSchema = z.object({
   code: z.string().min(1).max(20),

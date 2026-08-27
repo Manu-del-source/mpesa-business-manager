@@ -191,7 +191,7 @@ model ApiKey {
   name          String
   keyType       ApiKeyType
   prefix        String      // "pk_test", "sk_live", "whsec" — for identification
-  keyHash       String      // bcrypt hash of the secret portion
+  keyHash       String      @unique // SHA-256 hash of the full key (unique — auth lookup)
   keyPreview    String      // Last 4 chars of secret for display (e.g. "sk_live_...abcd")
   scopes        String[]    // Permission names this key grants
   expiresAt     DateTime?
@@ -204,7 +204,6 @@ model ApiKey {
 
   @@index([applicationId])
   @@index([applicationId, environment])
-  @@index([keyHash])
 }
 
 /// Provider connection (Daraja, etc.) per Application + Environment.
@@ -271,7 +270,7 @@ model Account {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  application Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application  @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   parent      Account?     @relation("AccountHierarchy", fields: [parentId], references: [id])
   children    Account[]    @relation("AccountHierarchy")
   entries     LedgerEntry[]
@@ -303,7 +302,7 @@ model JournalTransaction {
   voidReason    String?     // Reason for voiding
   createdAt     DateTime    @default(now())
 
-  application Application  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application  @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   entries     LedgerEntry[]
 
   @@index([applicationId])
@@ -371,6 +370,10 @@ enum PaymentDirection {
 /// source of truth for all payment activity. Legacy MpesaTransaction rows
 /// are linked via PaymentProviderReference.
 ///
+/// RETENTION: payment history is never deleted through FK cascades — the
+/// Application FK is ON DELETE RESTRICT. Tenants/applications are archived
+/// (deactivated), not deleted, when they hold financial history.
+///
 /// State machine:
 ///   PENDING → PROCESSING → SUCCEEDED → REFUNDED
 ///                    ↘ FAILED
@@ -393,7 +396,10 @@ model Payment {
 
   // Description and references
   description   String?
-  idempotencyKey String?        // Client-provided idempotency key
+  // Client-provided idempotency key. Uniqueness is scoped to the
+  // application + environment so the same key may be reused across
+  // SANDBOX and LIVE without conflict.
+  idempotencyKey String?
   reference     String?         // External reference (order ID, receipt, etc.)
 
   // Timestamps
@@ -401,7 +407,7 @@ model Payment {
   updatedAt     DateTime        @updatedAt
   processedAt   DateTime?       // When status moved to SUCCEEDED/FAILED/CANCELLED
 
-  application   Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application   Application     @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   attempts      PaymentAttempt[]
   providerRefs  PaymentProviderReference[]
   allocations   Allocation[]
@@ -409,12 +415,11 @@ model Payment {
   reconciledExceptions ReconciliationException[]
   refunds         Refund[]
 
-  @@unique([applicationId, idempotencyKey])
   @@index([applicationId])
   @@index([applicationId, environment])
   @@index([applicationId, status])
   @@index([applicationId, createdAt])
-  @@index([idempotencyKey])
+  @@index([applicationId, environment, idempotencyKey])
   @@index([status])
 }
 
@@ -425,7 +430,11 @@ model PaymentAttempt {
   id                   String   @id @default(cuid())
   paymentId            String
   provider             String   // "daraja", "sandbox"
-  status               String   // "PENDING", "ACCEPTED", "REJECTED", "ERROR"
+  // Status of the payment at the time of this attempt — one of the
+  // PaymentStatus enum values ("PENDING", "PROCESSING", "SUCCEEDED",
+  // "FAILED", "CANCELLED", "REFUNDED"). transitionPayment() records the
+  // payment's resulting status per attempt.
+  status               String
   providerRequestId    String?  // Provider's request ID (e.g. MerchantRequestID)
   providerCheckoutId   String?  // Provider's checkout/session ID (e.g. CheckoutRequestID)
   providerResponse     Json?    // Full provider response (sanitized)
@@ -501,7 +510,7 @@ model ReconciliationRun {
   discrepancies Int         @default(0)
   error         String?
 
-  application Application           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application           @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   items       ReconciliationItem[]
   exceptions  ReconciliationException[]
 
@@ -571,7 +580,7 @@ model AllocationRule {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  application Application          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application          @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   versions    AllocationRuleVersion[]
   allocations Allocation[]
 
@@ -655,13 +664,12 @@ model Payout {
   updatedAt     DateTime    @updatedAt
   processedAt   DateTime?
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
 
-  @@unique([applicationId, idempotencyKey])
   @@index([applicationId])
   @@index([applicationId, environment])
   @@index([applicationId, status])
-  @@index([idempotencyKey])
+  @@index([applicationId, environment, idempotencyKey])
 }
 
 // ---------------------------------------------------------------------------
@@ -693,13 +701,12 @@ model Refund {
   updatedAt     DateTime    @updatedAt
   processedAt   DateTime?
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   payment     Payment     @relation(fields: [paymentId], references: [id], onDelete: Restrict)
 
-  @@unique([applicationId, idempotencyKey])
   @@index([applicationId])
   @@index([paymentId])
-  @@index([idempotencyKey])
+  @@index([applicationId, environment, idempotencyKey])
 }
 
 // ---------------------------------------------------------------------------
@@ -717,7 +724,7 @@ model Event {
   metadata      Json?       // Correlation IDs, actor info, etc.
   createdAt     DateTime    @default(now())
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
 
   @@index([applicationId])
   @@index([applicationId, type])
@@ -739,7 +746,7 @@ model OutboxRecord {
   createdAt     DateTime    @default(now())
   dispatchedAt  DateTime?
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
 
   @@index([applicationId])
   @@index([applicationId, status])
@@ -764,7 +771,7 @@ model WebhookEndpoint {
   updatedAt     DateTime    @updatedAt
   lastTriggeredAt DateTime?
 
-  application Application      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application      @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   deliveries  WebhookDelivery[]
 
   @@index([applicationId])
@@ -786,7 +793,7 @@ model WebhookDelivery {
   createdAt         DateTime @default(now())
   deliveredAt       DateTime?
 
-  webhookEndpoint WebhookEndpoint @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+  webhookEndpoint WebhookEndpoint @relation(fields: [webhookEndpointId], references: [id], onDelete: Restrict)
 
   @@index([webhookEndpointId])
   @@index([status, nextRetryAt])
@@ -813,7 +820,7 @@ model AuditLog {
   metadata      Json?       // Correlation IDs, IP, user agent, request ID, etc.
   createdAt     DateTime    @default(now())
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
 
   @@index([applicationId])
   @@index([applicationId, environment])
@@ -840,7 +847,7 @@ model UsageRecord {
   periodStart   DateTime    // Start of the billing period this record belongs to
   periodEnd     DateTime    // End of the billing period
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
 
   @@index([applicationId])
   @@index([applicationId, environment, metric])

@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { Environment } from "@/generated/prisma";
+import type { Environment, Prisma } from "@/generated/prisma/client";
 import { getProvider } from "@/lib/providers/registry";
 
 // ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ export async function runReconciliation(
             externalStatus: queryResult.pending ? "PENDING" : `RESULT_${queryResult.resultCode}`,
             match,
             discrepancyType,
-            details: details as Record<string, unknown>,
+            details: details as unknown as Prisma.InputJsonValue,
           },
         });
 

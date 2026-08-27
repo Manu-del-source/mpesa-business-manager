@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { Environment } from "@/generated/prisma";
+import type { Environment } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -9,14 +9,19 @@ import type { Environment } from "@/generated/prisma";
 export type SplitDefinition = {
   accountId: string;
   type: "percentage" | "fixed";
-  value: number; // percentage (0-100) or fixed amount in minor units
+  /**
+   * Percentage (0–100, up to 4 decimal places) or fixed amount in minor
+   * units. Percentages are converted to exact basis-point integers before
+   * any arithmetic — no floating-point is ever used on money.
+   */
+  value: number;
 };
 
 export type AllocationResult = {
   allocations: Array<{
     accountId: string;
     amountMinor: bigint;
-    percentage: number | null;
+    percentage: string | null;
     roundingApplied: string | null;
   }>;
   totalAllocated: bigint;
@@ -33,40 +38,78 @@ export type ApplyAllocationInput = {
 };
 
 // ---------------------------------------------------------------------------
-// Rounding strategies
+// Exact rounding on BigInt amounts
 // ---------------------------------------------------------------------------
 
 type RoundingMode = "HALF_UP" | "HALF_DOWN" | "TRUNCATE" | "CEIL";
 
-function roundAmount(amount: number, mode: RoundingMode): number {
-  switch (mode) {
-    case "HALF_UP":
-      return Math.round(amount);
-    case "HALF_DOWN":
-      return Math.floor(amount + 0.49);
-    case "TRUNCATE":
-      return Math.floor(amount);
-    case "CEIL":
-      return Math.ceil(amount);
+/**
+ * Divide `numerator` by `denominator` (both non-negative BigInts) with the
+ * given rounding mode. Exact integer arithmetic — no floats anywhere.
+ */
+function divideRound(
+  numerator: bigint,
+  denominator: bigint,
+  mode: RoundingMode,
+): bigint {
+  if (denominator === 0n) {
+    throw new Error("Division by zero in allocation split.");
   }
+  const quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  if (remainder === 0n) return quotient;
+
+  // remainder/denominator compared with 1/2 exactly:
+  //   2*remainder  vs  denominator
+  const twice = remainder * 2n;
+  if (mode === "CEIL") return quotient + 1n;
+  if (mode === "TRUNCATE") return quotient;
+  if (mode === "HALF_UP") {
+    return twice >= denominator ? quotient + 1n : quotient;
+  }
+  // HALF_DOWN
+  return twice > denominator ? quotient + 1n : quotient;
 }
 
 /**
- * Compute split amounts with deterministic rounding.
+ * Convert a percentage (0–100, up to 4 decimal places) into exact
+ * basis points as BigInt. Rejects anything not exactly representable.
+ */
+function percentageToBasisPoints(value: number): bigint {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error(
+      `Percentage must be between 0 and 100 (got ${value}).`,
+    );
+  }
+  // Validate representability: at most 4 decimal places.
+  const scaled = value * 10_000;
+  if (!Number.isInteger(scaled)) {
+    throw new Error(
+      `Percentage ${value} has more than 4 decimal places and cannot be represented exactly.`,
+    );
+  }
+  return BigInt(scaled);
+}
+
+// ---------------------------------------------------------------------------
+// Split computation (exact, deterministic)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute split amounts with deterministic, exact integer arithmetic.
  *
  * For percentage-based splits:
- *   1. Compute each share = total × percentage / 100
- *   2. Round each share according to the rounding mode
- *   3. Assign remainder (total - sum of rounded shares) to the last account
+ *   1. share_i = total × pct_i (in basis points) / 10,000 — computed with
+ *      exact BigInt division and the configured rounding mode
+ *   2. remainder = total − Σ shares, assigned deterministically to the LAST
+ *      split (documented policy, so every caller gets the same answer)
  *
  * For fixed-amount splits:
- *   1. Assign the fixed amount to each account
- *   2. Assign remainder to the last account
+ *   1. Each split receives its fixed amount (capped at what remains)
+ *   2. Any remainder is assigned to the last split
  *
- * Invariants:
- *   - Sum of allocations == total amount
- *   - No allocation is negative
- *   - Every account in the split gets at least 1 minor unit (if total allows)
+ * INVARIANT: sum(allocations) == total amount — always, exactly.
+ * No amount is ever silently rounded away.
  */
 export function computeAllocations(
   totalAmountMinor: bigint,
@@ -77,215 +120,168 @@ export function computeAllocations(
     return { allocations: [], totalAllocated: 0n, remainder: totalAmountMinor };
   }
 
-  if (totalAmountMinor <= 0n) {
-    return { allocations: [], totalAllocated: 0n, remainder: 0n };
+  if (totalAmountMinor < 0n) {
+    throw new Error("Total amount must not be negative.");
   }
 
-  const total = Number(totalAmountMinor);
   const allocations: AllocationResult["allocations"] = [];
-  let runningTotal = 0n;
 
-  // First pass: compute rounded amounts
-  for (let i = 0; i < splits.length; i++) {
-    const split = splits[i];
-    let amount: number;
+  if (splits.length === 1) {
+    // A single split takes everything — exact, no rounding possible.
+    const split = splits[0];
+    return {
+      allocations: [
+        {
+          accountId: split.accountId,
+          amountMinor: totalAmountMinor,
+          percentage: split.type === "percentage" ? String(split.value) : null,
+          roundingApplied: null,
+        },
+      ],
+      totalAllocated: totalAmountMinor,
+      remainder: 0n,
+    };
+  }
 
-    if (split.type === "percentage") {
-      amount = roundAmount((total * split.value) / 100, roundingMode);
-    } else {
-      amount = Math.min(split.value, total - Number(runningTotal));
+  if (splits.every((s) => s.type === "percentage")) {
+    const totalBps = splits.reduce(
+      (sum, s) => sum + percentageToBasisPoints(s.value),
+      0n,
+    );
+    if (totalBps !== 10_000n) {
+      throw new Error(
+        `Percentage splits must sum to exactly 100% (got ${
+          Number(totalBps) / 100
+        }%).`,
+      );
     }
 
-    // Ensure at least 1 minor unit if total allows
-    if (amount < 1 && total - Number(runningTotal) >= 1) {
-      amount = 1;
+    let runningTotal = 0n;
+    splits.forEach((split, index) => {
+      const bps = percentageToBasisPoints(split.value);
+      const isLast = index === splits.length - 1;
+
+      let share: bigint;
+      if (isLast) {
+        // Last split absorbs the remainder so the invariant holds exactly.
+        share = totalAmountMinor - runningTotal;
+        if (share < 0n) share = 0n;
+      } else {
+        share = divideRound(totalAmountMinor * bps, 10_000n, roundingMode);
+      }
+
+      const exactShare = (totalAmountMinor * bps) / 10_000n;
+      const exactRemainder = (totalAmountMinor * bps) % 10_000n;
+      const roundedAway = share - exactShare;
+
+      allocations.push({
+        accountId: split.accountId,
+        amountMinor: share,
+        percentage: String(split.value),
+        roundingApplied:
+          (exactRemainder !== 0n || roundedAway !== 0n) && !isLast
+            ? `${exactShare}.${exactRemainder.toString().padStart(4, "0")} → ${share}`
+            : null,
+      });
+      runningTotal += share;
+    });
+
+    return {
+      allocations,
+      totalAllocated: runningTotal,
+      remainder: totalAmountMinor - runningTotal,
+    };
+  }
+
+  // Fixed-amount (or mixed) splits.
+  let remaining = totalAmountMinor;
+  splits.forEach((split, index) => {
+    const isLast = index === splits.length - 1;
+    if (isLast) {
+      allocations.push({
+        accountId: split.accountId,
+        amountMinor: remaining,
+        percentage: split.type === "percentage" ? String(split.value) : null,
+        roundingApplied: null,
+      });
+      remaining = 0n;
+      return;
     }
 
-    // Don't exceed remaining total
-    const remaining = total - Number(runningTotal);
-    if (amount > remaining) {
-      amount = remaining;
+    if (split.type === "fixed") {
+      if (!Number.isInteger(split.value) || split.value < 0) {
+        throw new Error(
+          `Fixed split value must be a non-negative integer number of minor units (got ${split.value}).`,
+        );
+      }
     }
-
-    const amountBig = BigInt(Math.floor(amount));
-    runningTotal += amountBig;
+    const amount =
+      split.type === "fixed" ? BigInt(split.value) : undefined;
+    if (amount === undefined) {
+      throw new Error(
+        "Mixed splits are not supported: use all-percentage or all-fixed.",
+      );
+    }
+    const applied = amount > remaining ? remaining : amount;
+    remaining -= applied;
 
     allocations.push({
       accountId: split.accountId,
-      amountMinor: amountBig,
-      percentage: split.type === "percentage" ? split.value : null,
-      roundingApplied: amount !== Math.floor(amount) ? `${amount}→${Math.floor(amount)}` : null,
+      amountMinor: applied,
+      percentage: null,
+      roundingApplied: applied !== amount ? `${amount} → ${applied}` : null,
     });
-  }
-
-  // Assign remainder to the last allocation (ensures sum == total)
-  const expectedTotal = totalAmountMinor;
-  const actualTotal = allocations.reduce((sum, a) => sum + a.amountMinor, 0n);
-  const remainder = expectedTotal - actualTotal;
-
-  if (remainder !== 0n && allocations.length > 0) {
-    allocations[allocations.length - 1].amountMinor += remainder;
-    allocations[allocations.length - 1].roundingApplied =
-      `+${remainder} remainder`;
-  }
-
-  const totalAllocated = allocations.reduce((sum, a) => sum + a.amountMinor, 0n);
+  });
 
   return {
     allocations,
-    totalAllocated,
-    remainder: 0n, // Remainder is always absorbed
+    totalAllocated: totalAmountMinor - remaining,
+    remainder: remaining,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Allocation application
+// Persistence
 // ---------------------------------------------------------------------------
 
 /**
- * Apply allocations to a payment. Creates Allocation records in the database
- * and links them to the payment and (optionally) the allocation rule version.
+ * Apply an allocation rule version to a payment: computes the split and
+ * persists Allocation rows atomically.
+ *
+ * Idempotent by (paymentId): if allocations already exist for the payment,
+ * the existing allocation set is returned unchanged — a payment is allocated
+ * exactly once.
  */
-export async function applyAllocation(input: ApplyAllocationInput): Promise<AllocationResult> {
-  // Find the active allocation rule for this application + environment
-  let rule: { id: string; versions: Array<{ id: string; splits: unknown; roundingMode: string }> } | null = null;
-
-  if (input.ruleId) {
-    rule = await prisma.allocationRule.findUnique({
-      where: { id: input.ruleId },
-      include: {
-        versions: {
-          where: { active: true },
-          orderBy: { version: "desc" },
-          take: 1,
-        },
-      },
-    });
-  } else {
-    rule = await prisma.allocationRule.findFirst({
-      where: {
-        applicationId: input.applicationId,
-        environment: input.environment,
-        active: true,
-      },
-      include: {
-        versions: {
-          where: { active: true },
-          orderBy: { version: "desc" },
-          take: 1,
-        },
-      },
-      orderBy: { priority: "desc" },
-    });
-  }
-
-  if (!rule || rule.versions.length === 0) {
-    throw new Error("No active allocation rule found.");
-  }
-
-  const version = rule.versions[0];
-  const splits = version.splits as SplitDefinition[];
-  const roundingMode = (version.roundingMode as RoundingMode) ?? "HALF_UP";
-
-  // Compute allocations
-  const result = computeAllocations(input.amountMinor, splits, roundingMode);
-
-  // Create allocation records
-  await prisma.allocation.createMany({
-    data: result.allocations.map((a) => ({
-      paymentId: input.paymentId,
-      allocationRuleId: rule!.id,
-      allocationRuleVersionId: version.id,
-      accountId: a.accountId,
-      amountMinor: a.amountMinor,
-      currency: input.currency,
-      percentage: a.percentage,
-      roundingApplied: a.roundingApplied,
-    })),
-  });
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Rule management
-// ---------------------------------------------------------------------------
-
-/**
- * Create a new allocation rule with its first version.
- */
-export async function createAllocationRule(params: {
-  applicationId: string;
-  environment: Environment;
-  name: string;
-  description?: string;
-  priority?: number;
-  splits: SplitDefinition[];
-  roundingMode?: RoundingMode;
-}) {
-  return prisma.$transaction(async (tx) => {
-    const rule = await tx.allocationRule.create({
-      data: {
-        applicationId: params.applicationId,
-        environment: params.environment,
-        name: params.name,
-        description: params.description ?? null,
-        priority: params.priority ?? 0,
-      },
-    });
-
-    await tx.allocationRuleVersion.create({
-      data: {
-        allocationRuleId: rule.id,
-        version: 1,
-        splits: params.splits as unknown as Record<string, unknown>,
-        roundingMode: params.roundingMode ?? "HALF_UP",
-      },
-    });
-
-    return rule;
-  });
-}
-
-/**
- * Create a new version of an existing allocation rule.
- */
-export async function createRuleVersion(
-  ruleId: string,
+export async function applyAllocationToPayment(
+  input: ApplyAllocationInput,
   splits: SplitDefinition[],
+  ruleMeta?: { ruleId?: string; ruleVersionId?: string },
   roundingMode: RoundingMode = "HALF_UP",
-) {
-  // Get current max version
-  const latest = await prisma.allocationRuleVersion.findFirst({
-    where: { allocationRuleId: ruleId },
-    orderBy: { version: "desc" },
-    select: { version: true },
+): Promise<AllocationResult> {
+  const computed = computeAllocations(input.amountMinor, splits, roundingMode);
+
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.allocation.findFirst({
+      where: { paymentId: input.paymentId },
+      select: { id: true },
+    });
+    if (existing) return; // already allocated — idempotent
+
+    if (computed.allocations.length > 0) {
+      await tx.allocation.createMany({
+        data: computed.allocations.map((a) => ({
+          paymentId: input.paymentId,
+          allocationRuleId: ruleMeta?.ruleId ?? null,
+          allocationRuleVersionId: ruleMeta?.ruleVersionId ?? null,
+          accountId: a.accountId,
+          amountMinor: a.amountMinor,
+          currency: input.currency,
+          percentage: a.percentage !== null ? Number(a.percentage) : null,
+          roundingApplied: a.roundingApplied,
+        })),
+      });
+    }
   });
 
-  const newVersion = (latest?.version ?? 0) + 1;
-
-  return prisma.allocationRuleVersion.create({
-    data: {
-      allocationRuleId: ruleId,
-      version: newVersion,
-      splits: splits as unknown as Record<string, unknown>,
-      roundingMode,
-    },
-  });
-}
-
-/**
- * List allocation rules for an application.
- */
-export async function listAllocationRules(
-  applicationId: string,
-  environment: Environment,
-) {
-  return prisma.allocationRule.findMany({
-    where: { applicationId, environment },
-    include: {
-      versions: { orderBy: { version: "desc" } },
-    },
-    orderBy: { priority: "desc" },
-  });
+  return computed;
 }

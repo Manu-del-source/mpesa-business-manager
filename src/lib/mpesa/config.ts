@@ -95,12 +95,14 @@ export type CallbackUrlProblem =
   | "NOT_PUBLIC"
   | "WRONG_PATH";
 
-export type CallbackUrlCheck = {
-  ok: boolean;
-  url: string;
-  problem?: CallbackUrlProblem;
-  message?: string;
-};
+export type CallbackUrlCheck =
+  | { ok: true; url: string }
+  | {
+      ok: false;
+      url: string;
+      problem: CallbackUrlProblem;
+      message: string;
+    };
 
 /**
  * Validate a callback URL against Safaricom's requirements *before* we send it
@@ -251,7 +253,7 @@ export async function getSafeMpesaConfig(orgId: string): Promise<SafeMpesaConfig
       hasPasskey: Boolean(row.passkey),
       callbackUrl: row.callbackUrl?.trim() || defaultCallbackUrl(),
       callbackReachable: orgCallbackCheck.ok,
-      callbackWarning: orgCallbackCheck.message ?? null,
+      callbackWarning: orgCallbackCheck.ok ? null : orgCallbackCheck.message,
       encryptionEnabled: encryptionEnabled(),
       demoMode: isDemoMode(),
       updatedAt: row.updatedAt.toISOString(),
@@ -271,7 +273,7 @@ export async function getSafeMpesaConfig(orgId: string): Promise<SafeMpesaConfig
       hasPasskey: true,
       callbackUrl: defaultCallbackUrl(),
       callbackReachable: envCallbackCheck.ok,
-      callbackWarning: envCallbackCheck.message ?? null,
+      callbackWarning: envCallbackCheck.ok ? null : envCallbackCheck.message,
       encryptionEnabled: encryptionEnabled(),
       demoMode: isDemoMode(),
       updatedAt: null,
@@ -290,7 +292,7 @@ export async function getSafeMpesaConfig(orgId: string): Promise<SafeMpesaConfig
     hasPasskey: false,
     callbackUrl: defaultCallbackUrl(),
     callbackReachable: noneCallbackCheck.ok,
-    callbackWarning: noneCallbackCheck.message ?? null,
+    callbackWarning: noneCallbackCheck.ok ? null : noneCallbackCheck.message,
     encryptionEnabled: encryptionEnabled(),
     demoMode: isDemoMode(),
     updatedAt: null,

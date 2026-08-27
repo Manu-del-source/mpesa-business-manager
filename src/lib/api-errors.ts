@@ -27,6 +27,7 @@ export interface ApiError {
 
 export class AppError extends Error {
   public readonly type: string;
+  public readonly title: string;
   public readonly status: number;
   public readonly detail?: string;
   public readonly errors?: Record<string, string[]>;
@@ -40,6 +41,7 @@ export class AppError extends Error {
   ) {
     super(title);
     this.type = type;
+    this.title = title;
     this.status = status;
     this.detail = detail;
     this.errors = errors;

@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import type { Environment, PayoutStatus } from "@/generated/prisma";
+import type { Environment, PayoutStatus } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Types
