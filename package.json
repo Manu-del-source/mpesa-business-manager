@@ -8,10 +8,18 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "db:push": "prisma db push",
+    "test": "node --import tsx --conditions react-server --test \"src/lib/__tests__/*.test.ts\" \"src/lib/mpesa/__tests__/*.test.ts\" \"src/lib/providers/__tests__/*.test.ts\"",
+    "test:spec": "node --import tsx --conditions react-server --test --test-reporter=spec \"src/lib/__tests__/*.test.ts\" \"src/lib/mpesa/__tests__/*.test.ts\" \"src/lib/providers/__tests__/*.test.ts\"",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:resolve": "prisma migrate resolve",
+    "db:migrate:baseline": "prisma migrate resolve --applied 0_init",
     "db:seed": "prisma db seed",
-    "db:setup": "prisma db push && prisma db seed",
-    "db:studio": "prisma studio"
+    "db:setup": "prisma migrate dev && prisma db seed",
+    "db:backfill-tenants": "npx tsx scripts/backfill-tenants.mjs",
+    "db:studio": "prisma studio",
+    "test:integration": "node --import tsx --conditions react-server --test \"tests/integration/*.test.ts\"",
+    "test:integration:spec": "node --import tsx --conditions react-server --test --test-reporter=spec \"tests/integration/*.test.ts\""
   },
   "dependencies": {
     "@hookform/resolvers": "^5.8.0",

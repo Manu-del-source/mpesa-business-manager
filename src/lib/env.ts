@@ -9,9 +9,20 @@
  * import this module's Daraja fields from a "use client" component.
  */
 export const env = {
+  /**
+   * The four values below are read lazily (getters) rather than snapshotted
+   * at module load: the process may receive them after import (delayed env
+   * injection, test harnesses), and reading them at point-of-use keeps a
+   * single source of truth in process.env.
+   */
+  get nodeEnv() {
+    return process.env.NODE_ENV ?? "development";
+  },
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
-  databaseUrl: process.env.DATABASE_URL ?? "",
+  get databaseUrl() {
+    return process.env.DATABASE_URL ?? "";
+  },
   appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
   demoMode: process.env.DEMO_MODE === "true",
 
@@ -22,16 +33,24 @@ export const env = {
    */
   mpesaCallbackBaseUrl: process.env.MPESA_CALLBACK_BASE_URL ?? "",
   /**
-   * Optional shared secret appended to the callback URL as `?token=...`.
+   * Shared secret appended to the callback URL as `?token=...`.
    * Daraja cannot send custom headers, so a URL token plus payload validation
    * is the practical way to reject spoofed callbacks.
+   *
+   * REQUIRED IN PRODUCTION (fail closed): when NODE_ENV=production and no
+   * token is configured, ALL callbacks are rejected — authentication never
+   * silently disables itself. See src/lib/mpesa/callback-auth.ts.
    */
-  mpesaCallbackToken: process.env.MPESA_CALLBACK_TOKEN ?? "",
+  get mpesaCallbackToken() {
+    return process.env.MPESA_CALLBACK_TOKEN ?? "";
+  },
   /**
    * 32-byte key (base64 or 64-char hex) used to encrypt Daraja consumer
    * secrets and passkeys at rest. Strongly recommended in production.
    */
-  mpesaCredentialsKey: process.env.MPESA_CREDENTIALS_KEY ?? "",
+  get mpesaCredentialsKey() {
+    return process.env.MPESA_CREDENTIALS_KEY ?? "";
+  },
   /** Milliseconds before a Daraja HTTP request is aborted. */
   darajaTimeoutMs: Number(process.env.DARAJA_TIMEOUT_MS ?? 20_000),
 
@@ -48,6 +67,15 @@ export const env = {
 
 export function isDemoMode(): boolean {
   return env.demoMode;
+}
+
+/**
+ * True when running in production (`NODE_ENV=production`). Used by
+ * fail-closed security checks: features that are optional in development
+ * (e.g. the M-Pesa callback token) become REQUIRED here.
+ */
+export function isProduction(): boolean {
+  return env.nodeEnv === "production";
 }
 
 /**

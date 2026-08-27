@@ -58,6 +58,25 @@ enum MpesaEnvironment {
   PRODUCTION
 }
 
+/// Platform-wide environment isolation for infrastructure resources.
+/// Every financial record (payments, ledger entries, payouts, refunds,
+/// API keys…) carries an environment; SANDBOX data can never interact with
+/// live provider traffic.
+enum Environment {
+  SANDBOX
+  LIVE
+}
+
+/// Roles a user can hold within a Tenant. Authorization never relies on role
+/// names alone — permissions are resolved from these roles (see lib/rbac).
+enum TenantRole {
+  OWNER
+  ADMIN
+  DEVELOPER
+  FINANCE
+  VIEWER
+}
+
 enum ExpenseCategory {
   INVENTORY
   RENT
@@ -72,7 +91,772 @@ enum ExpenseCategory {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-tenancy
+// Multi-tenancy (infrastructure core)
+// ---------------------------------------------------------------------------
+
+/// Tenant = an independent business/customer of the platform (e.g. STOR1).
+/// Tenants own Applications; Applications own API keys and (in later phases)
+/// payments, ledger accounts, payouts, webhooks, etc. All infrastructure
+/// resources are tenant-scoped.
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications  Application[]
+  members       TenantMember[]
+  organizations Organization[]
+
+  @@index([createdAt])
+}
+
+/// Membership of a Supabase Auth user in a Tenant. A user may belong to many
+/// tenants; authorization checks resolve permissions from this role.
+model TenantMember {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      TenantRole @default(VIEWER)
+  createdAt DateTime   @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+/// Application = a product/surface within a Tenant (STOR1 Web, STOR1 Mobile…).
+/// Every application implicitly has SANDBOX and LIVE environments; individual
+/// records carry the `Environment` enum. An application belongs to exactly
+/// one tenant.
+model Application {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  slug        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apiKeys         ApiKey[]
+  providerConnections ProviderConnection[]
+  accounts        Account[]
+  journalTransactions JournalTransaction[]
+  payments        Payment[]
+  reconciliationRuns ReconciliationRun[]
+  allocationRules AllocationRule[]
+  payouts         Payout[]
+  refunds         Refund[]
+  events          Event[]
+  outboxRecords   OutboxRecord[]
+  webhookEndpoints WebhookEndpoint[]
+  auditLogs        AuditLog[]
+  usageRecords     UsageRecord[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+}
+
+/// Explicit permission grant for a role. Avoids relying on role names alone.
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique // e.g. "payments:create", "ledger:read"
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles Role[]
+}
+
+/// Role with explicit permissions. Maps to TenantRole enum but allows
+/// granular permission management without enum changes.
+model Role {
+  id          String       @id @default(cuid())
+  name        TenantRole   @unique
+  description String?
+  permissions Permission[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+/// API key for an Application in a specific Environment.
+/// Public keys (pk_*) are safe to expose; Secret keys (sk_*) and Webhook
+/// signing secrets (whsec_*) are stored hashed and only shown once on creation.
+model ApiKey {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  name          String
+  keyType       ApiKeyType
+  prefix        String      // "pk_test", "sk_live", "whsec" — for identification
+  keyHash       String      @unique // SHA-256 hash of the full key (unique — auth lookup)
+  keyPreview    String      // Last 4 chars of secret for display (e.g. "sk_live_...abcd")
+  scopes        String[]    // Permission names this key grants
+  expiresAt     DateTime?
+  revokedAt     DateTime?
+  lastUsedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+}
+
+/// Provider connection (Daraja, etc.) per Application + Environment.
+/// Replaces per-Organization MpesaConfig. Secrets encrypted at rest.
+model ProviderConnection {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  provider      String      // "daraja", "sandbox"
+  displayName   String      // Human-readable name
+  config        Json        // Provider-specific config (shortcode, etc.)
+  credentials   Json        // Encrypted secrets (consumerSecret, passkey, etc.)
+  enabled       Boolean     @default(false)
+  isDefault     Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, environment, provider])
+  @@index([applicationId])
+  @@index([applicationId, environment])
+}
+
+enum ApiKeyType {
+  PUBLIC
+  SECRET
+  WEBHOOK_SECRET
+}
+
+// ---------------------------------------------------------------------------
+// Financial core (double-entry ledger)
+// ---------------------------------------------------------------------------
+
+/// Standard account types following double-entry bookkeeping conventions.
+/// Assets and expenses carry normal debit balances; liabilities, equity, and
+/// revenue carry normal credit balances.
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+/// Chart of accounts entry. Each Account belongs to an Application and is
+/// scoped to an Environment (SANDBOX or LIVE). Accounts are hierarchical
+/// (parent/child) but balances are always computed from the ledger entries
+/// — never stored on the Account row itself.
+///
+/// Invariant: an Account's balance is the sum of all non-voided LedgerEntry
+/// rows referencing it, respecting normal balance direction.
+model Account {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  code          String      // Human-readable code, e.g. "1000", "2010"
+  name          String      // "Cash on Hand", "M-Pesa Float", "Sales Revenue"
+  type          AccountType
+  parentId      String?     // For hierarchical chart of accounts
+  currency      String      @default("KES")
+  active        Boolean     @default(true)
+  description   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application  @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  parent      Account?     @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children    Account[]    @relation("AccountHierarchy")
+  entries     LedgerEntry[]
+  allocations Allocation[]
+
+  @@unique([applicationId, environment, code])
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, environment, type])
+}
+
+/// A balanced journal entry — the atomic unit of the ledger. Every financial
+/// event creates exactly one JournalTransaction with two or more LedgerEntry
+/// rows whose debits equal credits.
+///
+/// Invariants:
+///  - sum(debits) == sum(credits) for all non-voided entries
+///  - at least two entries per journal transaction
+///  - JournalTransaction is never modified after creation (immutable)
+model JournalTransaction {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  reference     String?     // External reference (payment ID, receipt number, etc.)
+  description   String      // "Payment from customer", "Refund for order #123"
+  postedAt      DateTime    @default(now()) // When the entry was posted
+  voidedAt      DateTime?   // Non-null = this entire journal entry is voided
+  voidedBy      String?     // Actor who voided
+  voidReason    String?     // Reason for voiding
+  createdAt     DateTime    @default(now())
+
+  application Application  @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  entries     LedgerEntry[]
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, postedAt])
+  @@index([reference])
+}
+
+/// A single debit or credit line within a JournalTransaction. LedgerEntry
+/// rows are append-only — they are never updated or deleted in normal
+/// operation. To reverse an entry, post a new JournalTransaction with
+/// opposite debits/credits.
+///
+/// Invariants:
+///  - amountMinor > 0 (entries always carry a positive amount)
+///  - type must match Account.type's normal balance:
+///    DEBIT entries reduce credit-balance accounts (LIABILITY, EQUITY, REVENUE)
+///    CREDIT entries reduce debit-balance accounts (ASSET, EXPENSE)
+model LedgerEntry {
+  id                   String      @id @default(cuid())
+  journalTransactionId String
+  accountId            String
+  type                 LedgerEntryType
+  amountMinor          BigInt      // Amount in minor units (cents), always > 0
+  currency             String      @default("KES")
+  description          String?
+  createdAt            DateTime    @default(now())
+
+  journalTransaction JournalTransaction @relation(fields: [journalTransactionId], references: [id], onDelete: Restrict)
+  account            Account             @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([journalTransactionId])
+  @@index([accountId])
+  @@index([accountId, createdAt])
+  @@index([createdAt])
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+}
+
+// ---------------------------------------------------------------------------
+// Payment domain (provider-agnostic)
+// ---------------------------------------------------------------------------
+
+/// Provider-agnostic payment status. Every state transition is recorded
+/// in PaymentAttempt; the Payment.status is the current aggregated state.
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+/// Provider-agnostic payment direction.
+enum PaymentDirection {
+  INCOMING
+  OUTGOING
+}
+
+/// A provider-agnostic payment record. Replaces MpesaTransaction as the
+/// source of truth for all payment activity. Legacy MpesaTransaction rows
+/// are linked via PaymentProviderReference.
+///
+/// RETENTION: payment history is never deleted through FK cascades — the
+/// Application FK is ON DELETE RESTRICT. Tenants/applications are archived
+/// (deactivated), not deleted, when they hold financial history.
+///
+/// State machine:
+///   PENDING → PROCESSING → SUCCEEDED → REFUNDED
+///                    ↘ FAILED
+///          → CANCELLED
+model Payment {
+  id            String          @id @default(cuid())
+  applicationId String
+  environment   Environment     @default(SANDBOX)
+  direction     PaymentDirection @default(INCOMING)
+  status        PaymentStatus   @default(PENDING)
+
+  // Amount in minor units (cents). KES only initially.
+  amountMinor   BigInt
+  currency      String          @default("KES")
+
+  // Customer/supplier info
+  phone         String?
+  email         String?
+  customerName  String?
+
+  // Description and references
+  description   String?
+  // Client-provided idempotency key. Uniqueness is scoped to the
+  // application + environment so the same key may be reused across
+  // SANDBOX and LIVE without conflict.
+  idempotencyKey String?
+  reference     String?         // External reference (order ID, receipt, etc.)
+
+  // Timestamps
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  processedAt   DateTime?       // When status moved to SUCCEEDED/FAILED/CANCELLED
+
+  application   Application     @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  attempts      PaymentAttempt[]
+  providerRefs  PaymentProviderReference[]
+  allocations   Allocation[]
+  reconciledItems ReconciliationItem[]
+  reconciledExceptions ReconciliationException[]
+  refunds         Refund[]
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, status])
+  @@index([applicationId, createdAt])
+  @@index([applicationId, environment, idempotencyKey])
+  @@index([status])
+}
+
+/// Individual attempt to process a payment through a provider. A single
+/// Payment may have multiple attempts (retries, different providers).
+/// Each attempt is immutable once created — the state machine append-only.
+model PaymentAttempt {
+  id                   String   @id @default(cuid())
+  paymentId            String
+  provider             String   // "daraja", "sandbox"
+  // Status of the payment at the time of this attempt — one of the
+  // PaymentStatus enum values ("PENDING", "PROCESSING", "SUCCEEDED",
+  // "FAILED", "CANCELLED", "REFUNDED"). transitionPayment() records the
+  // payment's resulting status per attempt.
+  status               String
+  providerRequestId    String?  // Provider's request ID (e.g. MerchantRequestID)
+  providerCheckoutId   String?  // Provider's checkout/session ID (e.g. CheckoutRequestID)
+  providerResponse     Json?    // Full provider response (sanitized)
+  errorCode            String?  // Provider-specific error code
+  errorMessage         String?  // Human-readable error from provider
+  amountMinor          BigInt   // Amount attempted
+  currency             String   @default("KES")
+  createdAt            DateTime @default(now())
+  completedAt          DateTime?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([providerRequestId])
+  @@index([providerCheckoutId])
+}
+
+/// Provider-specific correlation IDs for a payment. Links the
+/// provider-agnostic Payment to provider-specific records (e.g.
+/// MpesaTransaction). Used for reconciliation and debugging.
+model PaymentProviderReference {
+  id                String   @id @default(cuid())
+  paymentId         String
+  provider          String   // "daraja", "sandbox"
+  externalId        String   // Provider's external ID (e.g. checkoutRequestId)
+  externalType      String   // "checkout_request", "merchant_request", "receipt"
+  legacyModelId     String?  // FK to legacy model (e.g. MpesaTransaction.id)
+  legacyModelName   String?  // "MpesaTransaction"
+  createdAt         DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, externalId])
+  @@index([paymentId])
+  @@index([externalId])
+  @@index([legacyModelId])
+}
+
+/// Durable idempotency key. Prevents duplicate financial operations when
+/// clients retry requests. Each record is scoped to an application +
+/// environment and has a TTL.
+model IdempotencyRecord {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  key           String      // The idempotency key provided by the client
+  requestHash   String      // Hash of the request body (detects changed payloads)
+  responseStatus Int        // HTTP status code to return
+  responseBody  Json        // Response body to return
+  expiresAt     DateTime    // TTL — clean up old records
+  createdAt     DateTime    @default(now())
+
+  @@unique([applicationId, environment, key])
+  @@index([applicationId, environment, key])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation
+// ---------------------------------------------------------------------------
+
+/// A reconciliation run — compares internal payment records against
+/// provider records to find discrepancies.
+model ReconciliationRun {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  status        String      @default("RUNNING") // RUNNING, COMPLETED, FAILED
+  startedAt     DateTime    @default(now())
+  completedAt   DateTime?
+  totalChecked  Int         @default(0)
+  matched       Int         @default(0)
+  discrepancies Int         @default(0)
+  error         String?
+
+  application Application           @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  items       ReconciliationItem[]
+  exceptions  ReconciliationException[]
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, startedAt])
+}
+
+/// Individual item checked during a reconciliation run.
+model ReconciliationItem {
+  id                 String   @id @default(cuid())
+  reconciliationRunId String
+  paymentId          String?
+  externalId         String?  // Provider's ID (checkoutRequestId, etc.)
+  internalStatus     String?  // Our payment status
+  externalStatus     String?  // Provider's reported status
+  match              Boolean  @default(true) // Whether internal matches external
+  discrepancyType   String?  // "STATUS_MISMATCH", "AMOUNT_MISMATCH", "MISSING_INTERNAL", "MISSING_EXTERNAL"
+  details            Json?    // Additional comparison details
+  createdAt          DateTime @default(now())
+
+  reconciliationRun ReconciliationRun @relation(fields: [reconciliationRunId], references: [id], onDelete: Cascade)
+  payment           Payment?          @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([reconciliationRunId])
+  @@index([paymentId])
+}
+
+/// A reconciliation exception — a discrepancy that requires human review
+/// or automated resolution.
+model ReconciliationException {
+  id                 String   @id @default(cuid())
+  reconciliationRunId String
+  paymentId          String?
+  type               String   // "STATUS_MISMATCH", "AMOUNT_MISMATCH", "MISSING_RECORD", "DUPLICATE"
+  severity           String   @default("WARNING") // INFO, WARNING, CRITICAL
+  description        String
+  suggestedAction    String?  // "Update status to SUCCESS", "Flag for review"
+  resolved           Boolean  @default(false)
+  resolvedAt         DateTime?
+  resolvedBy         String?
+  resolution         String?  // How it was resolved
+  createdAt          DateTime @default(now())
+
+  reconciliationRun ReconciliationRun @relation(fields: [reconciliationRunId], references: [id], onDelete: Cascade)
+  payment           Payment?          @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([reconciliationRunId])
+  @@index([paymentId])
+  @@index([resolved])
+}
+
+// ---------------------------------------------------------------------------
+// Allocation engine
+// ---------------------------------------------------------------------------
+
+/// A rule that determines how incoming payments are split across accounts.
+/// Rules are versioned so historical allocations are preserved when rules change.
+model AllocationRule {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  name          String      // "Default split", "Tax allocation", etc.
+  description   String?
+  active        Boolean     @default(true)
+  priority      Int         @default(0) // Higher = evaluated first
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  application Application          @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  versions    AllocationRuleVersion[]
+  allocations Allocation[]
+
+  @@unique([applicationId, environment, name])
+  @@index([applicationId])
+  @@index([applicationId, environment, active])
+}
+
+/// A version of an allocation rule. Each version contains the actual split
+/// percentages/amounts. Old versions are preserved for historical audit.
+model AllocationRuleVersion {
+  id                String   @id @default(cuid())
+  allocationRuleId String
+  version           Int      // Sequential version number
+  // Split definition: JSON array of { accountId, type, percentage } or { accountId, type, fixedAmountMinor }
+  splits            Json     // [{ accountId, type: "percentage"|"fixed", value }]
+  roundingMode      String   @default("HALF_UP") // HALF_UP, HALF_DOWN, TRUNCATE, CEIL
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  allocationRule AllocationRule @relation(fields: [allocationRuleId], references: [id], onDelete: Cascade)
+  allocations    Allocation[] @relation("VersionAllocations")
+
+  @@unique([allocationRuleId, version])
+  @@index([allocationRuleId])
+}
+
+/// A concrete allocation applied to a specific payment. Records exactly
+/// how a payment was split across accounts.
+model Allocation {
+  id                     String   @id @default(cuid())
+  paymentId              String
+  allocationRuleId       String?
+  allocationRuleVersionId String?
+  accountId              String
+  amountMinor            BigInt   // Amount allocated to this account (always > 0)
+  currency               String   @default("KES")
+  percentage             Float?   // Original percentage if percentage-based split
+  roundingApplied        String?  // Rounding adjustment description
+  createdAt              DateTime @default(now())
+
+  payment              Payment              @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  allocationRule       AllocationRule?      @relation(fields: [allocationRuleId], references: [id], onDelete: SetNull)
+  allocationRuleVersion AllocationRuleVersion? @relation("VersionAllocations", fields: [allocationRuleVersionId], references: [id], onDelete: SetNull)
+  account              Account              @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([accountId])
+  @@index([allocationRuleId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Payouts
+// ---------------------------------------------------------------------------
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model Payout {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  status        PayoutStatus @default(PENDING)
+  amountMinor   BigInt
+  currency      String      @default("KES")
+  recipientPhone String
+  recipientName String?
+  description   String?
+  reference     String?
+  idempotencyKey String?
+  providerRequestId String?
+  errorCode     String?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  processedAt   DateTime?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, status])
+  @@index([applicationId, environment, idempotencyKey])
+}
+
+// ---------------------------------------------------------------------------
+// Refunds
+// ---------------------------------------------------------------------------
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model Refund {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  paymentId     String
+  status        RefundStatus @default(PENDING)
+  amountMinor   BigInt       // Refund amount (must not exceed original payment)
+  currency      String      @default("KES")
+  reason        String?
+  reference     String?
+  idempotencyKey String?
+  errorCode     String?
+  errorMessage  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  processedAt   DateTime?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  payment     Payment     @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId])
+  @@index([paymentId])
+  @@index([applicationId, environment, idempotencyKey])
+}
+
+// ---------------------------------------------------------------------------
+// Events & Outbox
+// ---------------------------------------------------------------------------
+
+model Event {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  type          String      // "payment.created", "payment.succeeded", "payout.completed", etc.
+  aggregateType String      // "Payment", "Payout", "Refund", etc.
+  aggregateId   String      // ID of the entity this event is about
+  payload       Json        // Event-specific data
+  metadata      Json?       // Correlation IDs, actor info, etc.
+  createdAt     DateTime    @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId])
+  @@index([applicationId, type])
+  @@index([applicationId, aggregateType, aggregateId])
+  @@index([createdAt])
+}
+
+model OutboxRecord {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  eventType     String      // Event type to dispatch
+  payload       Json        // Event payload
+  status        String      @default("PENDING") // PENDING, DISPATCHED, FAILED
+  attempts      Int         @default(0)
+  maxAttempts   Int         @default(5)
+  nextRetryAt   DateTime?
+  lastError     String?
+  createdAt     DateTime    @default(now())
+  dispatchedAt  DateTime?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId])
+  @@index([applicationId, status])
+  @@index([status, nextRetryAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks
+// ---------------------------------------------------------------------------
+
+model WebhookEndpoint {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  url           String      // HTTPS endpoint to POST events to
+  secret        String      // HMAC signing secret (hashed)
+  events        String[]    // Event types to subscribe to (empty = all)
+  active        Boolean     @default(true)
+  description   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  lastTriggeredAt DateTime?
+
+  application Application      @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  deliveries  WebhookDelivery[]
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+}
+
+model WebhookDelivery {
+  id                String   @id @default(cuid())
+  webhookEndpointId String
+  eventType         String
+  payload           Json
+  status            String   @default("PENDING") // PENDING, SENT, FAILED
+  httpStatusCode    Int?
+  responseBody      String?
+  attempts          Int      @default(0)
+  maxAttempts       Int      @default(3)
+  nextRetryAt       DateTime?
+  lastError         String?
+  createdAt         DateTime @default(now())
+  deliveredAt       DateTime?
+
+  webhookEndpoint WebhookEndpoint @relation(fields: [webhookEndpointId], references: [id], onDelete: Restrict)
+
+  @@index([webhookEndpointId])
+  @@index([status, nextRetryAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Audit log (append-only)
+// ---------------------------------------------------------------------------
+
+/// Append-only audit log. Every significant action (financial state change,
+/// permission grant, API key creation, etc.) is recorded here. Rows are
+/// never updated or deleted.
+model AuditLog {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  actorId       String      // Supabase auth user ID or "system"
+  actorType     String      @default("user") // "user", "api_key", "system", "webhook"
+  action        String      // "payment.created", "payment.succeeded", "api_key.created", etc.
+  targetType    String      // "Payment", "Payout", "ApiKey", "WebhookEndpoint", etc.
+  targetId      String      // ID of the affected entity
+  changes       Json?       // Before/after diff for updates (null for creates/deletes)
+  metadata      Json?       // Correlation IDs, IP, user agent, request ID, etc.
+  createdAt     DateTime    @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId])
+  @@index([applicationId, environment])
+  @@index([applicationId, action])
+  @@index([applicationId, targetType, targetId])
+  @@index([applicationId, actorId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Usage / Billing
+// ---------------------------------------------------------------------------
+
+/// Usage record for metering API calls and financial operations.
+/// Aggregated periodically for billing.
+model UsageRecord {
+  id            String      @id @default(cuid())
+  applicationId String
+  environment   Environment @default(SANDBOX)
+  metric        String      // "payments.initiated", "payments.succeeded", "api_calls", etc.
+  quantity      Int         @default(1)
+  metadata      Json?       // Additional context (amount, provider, etc.)
+  recordedAt    DateTime    @default(now())
+  periodStart   DateTime    // Start of the billing period this record belongs to
+  periodEnd     DateTime    // End of the billing period
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId])
+  @@index([applicationId, environment, metric])
+  @@index([applicationId, periodStart])
+  @@index([recordedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Multi-tenancy (legacy POS layer — kept for the existing business manager)
 // ---------------------------------------------------------------------------
 
 model Organization {
@@ -84,6 +868,11 @@ model Organization {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
 
+  /// Infrastructure tenant this POS organization belongs to (1:1 during the
+  /// transition). Null only for rows created before the tenant backfill.
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
   members          OrganizationMember[]
   products         Product[]
   customers        Customer[]
@@ -93,6 +882,7 @@ model Organization {
   mpesaConfig      MpesaConfig?
 
   @@index([tier])
+  @@index([tenantId])
 }
 
 // userId references a Supabase Auth user id (or "demo-user" in demo mode).

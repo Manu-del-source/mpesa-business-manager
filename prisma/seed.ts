@@ -388,13 +388,76 @@ async function main() {
     });
   }
 
-  console.log("✅ Seed complete:");
+  // ---- Roles & Permissions (Phase 2 RBAC) ------------------------------
+  console.log("\n🔑 Seeding roles and permissions…");
+
+  const PERMISSIONS = [
+    "payments:create", "payments:read", "payments:refund", "payments:cancel",
+    "payouts:create", "payouts:read", "payouts:approve",
+    "ledger:read", "ledger:post",
+    "reconciliation:read", "reconciliation:run",
+    "webhooks:read", "webhooks:manage",
+    "api-keys:read", "api-keys:manage",
+    "providers:read", "providers:manage",
+    "settings:read", "settings:manage",
+    "members:read", "members:manage",
+    "audit:read", "usage:read",
+    "pos:sales", "pos:inventory", "pos:customers", "pos:expenses", "pos:reports",
+  ];
+
+  // Create permissions
+  for (const name of PERMISSIONS) {
+    await prisma.permission.upsert({ where: { name }, create: { name }, update: {} });
+  }
+
+  // Create roles with permissions
+  const roleDefs: { name: "OWNER" | "ADMIN" | "DEVELOPER" | "FINANCE" | "VIEWER"; perms: string[] }[] = [
+    { name: "OWNER", perms: PERMISSIONS },
+    { name: "ADMIN", perms: PERMISSIONS.filter(p => p !== "members:manage") },
+    { name: "DEVELOPER", perms: ["payments:create", "payments:read", "ledger:read", "webhooks:read", "webhooks:manage", "api-keys:read", "api-keys:manage", "providers:read", "audit:read", "pos:sales", "pos:inventory", "pos:customers"] },
+    { name: "FINANCE", perms: ["payments:create", "payments:read", "payments:refund", "payouts:create", "payouts:read", "payouts:approve", "ledger:read", "ledger:post", "reconciliation:read", "reconciliation:run", "audit:read", "usage:read", "pos:sales", "pos:reports"] },
+    { name: "VIEWER", perms: ["payments:read", "ledger:read", "reconciliation:read", "audit:read", "usage:read", "pos:sales", "pos:inventory", "pos:customers", "pos:reports"] },
+  ];
+
+  for (const { name, perms } of roleDefs) {
+    const role = await prisma.role.upsert({ where: { name }, create: { name }, update: {} });
+    for (const permName of perms) {
+      const perm = await prisma.permission.findUnique({ where: { name: permName } });
+      if (perm) {
+        await prisma.role.update({ where: { id: role.id }, data: { permissions: { connect: { id: perm.id } } } });
+      }
+    }
+  }
+
+  // Create Tenant + TenantMember for the demo org
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: org.slug },
+    create: { name: org.name, slug: org.slug },
+    update: {},
+  });
+  await prisma.organization.update({ where: { id: org.id }, data: { tenantId: tenant.id } });
+  const app = await prisma.application.upsert({
+    where: { tenantId_slug: { tenantId: tenant.id, slug: "default-app" } },
+    create: { tenantId: tenant.id, name: `${org.name} App`, slug: "default-app", description: "Default application" },
+    update: {},
+  });
+  await prisma.tenantMember.upsert({
+    where: { tenantId_userId: { tenantId: tenant.id, userId: "demo-user" } },
+    create: { tenantId: tenant.id, userId: "demo-user", role: "OWNER" },
+    update: {},
+  });
+
+  console.log(`\n✅ Seed complete:`);
   console.log(`   Org:            ${org.name} (${org.slug})`);
+  console.log(`   Tenant:         ${tenant.name} (${tenant.slug})`);
+  console.log(`   Application:    ${app.name} (${app.slug})`);
   console.log(`   Products:       ${productRecords.length}`);
   console.log(`   Customers:      ${customerRecords.length}`);
   console.log(`   Sales:          ${completedSales} (${formatKES(totalRevenue)} revenue)`);
   console.log(`   M-Pesa txns:    ${(await prisma.mpesaTransaction.count({ where: { organizationId: org.id } }))}`);
   console.log(`   Expenses:       ${expenses.length}`);
+  console.log(`   Permissions:    ${PERMISSIONS.length}`);
+  console.log(`   Roles:          ${roleDefs.length}`);
   console.log("   Demo sign-in:   any email + password (demo mode)");
 }
 

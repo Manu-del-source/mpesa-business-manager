@@ -132,8 +132,21 @@ export async function sendDarajaStkPush(
     // CustomerPayBillOnline works for paybill shortcodes; till numbers use
     // CustomerBuyGoodsOnline. Sandbox shortcode 174379 is a paybill.
     TransactionType: "CustomerPayBillOnline",
-    // Daraja rejects decimals — STK Push amounts are whole shillings.
-    Amount: Math.max(1, Math.round(input.amount)),
+    // Daraja only accepts whole shillings. A fractional (or non-positive)
+    // amount is REJECTED here rather than rounded — silently changing what
+    // the customer is charged is never acceptable.
+    Amount: (() => {
+      if (!Number.isInteger(input.amount) || input.amount < 1) {
+        throw new DarajaError("INVALID_REQUEST", {
+          detail:
+            `STK Push amount must be a whole number of Kenyan shillings ` +
+            `(got ${input.amount}).`,
+          userMessage:
+            "Amount must be a whole number of Kenyan shillings.",
+        });
+      }
+      return input.amount;
+    })(),
     PartyA: input.phone,
     PartyB: config.shortcode,
     PhoneNumber: input.phone,

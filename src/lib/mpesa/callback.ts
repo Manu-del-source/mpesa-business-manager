@@ -2,6 +2,8 @@ import "server-only";
 import type { MpesaStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logMpesa, logMpesaError } from "@/lib/mpesa/log";
+import { enqueueSaleSettlementTx } from "@/lib/settlement";
+import { resolveTenantForOrg } from "@/lib/provisioning";
 
 /**
  * Daraja STK Push callback handling.
@@ -183,6 +185,14 @@ export type ApplyCallbackOutcome =
  * Idempotency: the update is scoped to `status: PENDING` via `updateMany`, so
  * a replayed callback (Safaricom retries) matches zero rows and is reported as
  * a duplicate instead of overwriting a settled transaction.
+ *
+ * SETTLEMENT SEMANTICS (retryable, never lost): when the guarded update wins,
+ * the durable settlement work for a linked POS sale is enqueued as an outbox
+ * record IN THE SAME TRANSACTION as the provider-result write. The callback
+ * is then acknowledged — the settlement worker (inline best-effort + the
+ * reconciliation sweep) retries the financial side until it succeeds, with
+ * every operation idempotent. A settlement failure can never be masked by a
+ * permanently "processed" callback.
  */
 export async function applyStkCallback(
   payload: StkCallbackPayload,
@@ -202,19 +212,44 @@ export async function applyStkCallback(
 
   const status = statusForResultCode(payload.resultCode);
 
-  const updated = await prisma.mpesaTransaction.updateMany({
-    where: { id: existing.id, status: "PENDING" },
-    data: {
-      status,
-      resultCode: payload.resultCode,
-      resultDesc: payload.resultDesc.slice(0, 500),
-      receiptNo: payload.receiptNumber ?? undefined,
-      merchantRequestId: payload.merchantRequestId || undefined,
-      completedAt: payload.transactionDate ?? new Date(),
-    },
+  // The org's application context for the outbox record — idempotent
+  // provisioning (legacy organizations get a tenant + default application).
+  let applicationId: string | null = null;
+  if (existing.reference) {
+    const { application } = await resolveTenantForOrg(existing.organizationId);
+    applicationId = application.id;
+  }
+
+  const applied = await prisma.$transaction(async (tx) => {
+    // Guarded update: only a still-PENDING transaction accepts the result.
+    const updated = await tx.mpesaTransaction.updateMany({
+      where: { id: existing.id, status: "PENDING" },
+      data: {
+        status,
+        resultCode: payload.resultCode,
+        resultDesc: payload.resultDesc.slice(0, 500),
+        receiptNo: payload.receiptNumber ?? undefined,
+        merchantRequestId: payload.merchantRequestId || undefined,
+        completedAt: payload.transactionDate ?? new Date(),
+      },
+    });
+    if (updated.count === 0) return false;
+
+    // Provider result is now durable. Enqueue the settlement work in the
+    // SAME transaction so it cannot be lost, whatever happens next.
+    if (existing.reference && applicationId) {
+      await enqueueSaleSettlementTx(tx, applicationId, {
+        organizationId: existing.organizationId,
+        receiptNo: existing.reference,
+        status,
+        mpesaReceipt: payload.receiptNumber,
+        transactionId: existing.id,
+      });
+    }
+    return true;
   });
 
-  if (updated.count === 0) {
+  if (!applied) {
     logMpesa("callback.duplicate_ignored", {
       transactionId: existing.id,
       checkoutRequestId: payload.checkoutRequestId,
@@ -230,64 +265,5 @@ export async function applyStkCallback(
     status,
   });
 
-  // Settle the linked sale, if this push was for one.
-  if (existing.reference) {
-    await settleLinkedSale(existing.organizationId, existing.reference, status, payload.receiptNumber);
-  }
-
   return { outcome: "applied", transactionId: existing.id, status };
-}
-
-/**
- * Reflect the payment outcome on a PENDING M-Pesa sale created by the POS.
- * Stock is decremented only once the payment is confirmed.
- */
-async function settleLinkedSale(
-  orgId: string,
-  receiptNo: string,
-  status: MpesaStatus,
-  mpesaReceipt: string | null,
-): Promise<void> {
-  const sale = await prisma.sale.findFirst({
-    where: {
-      organizationId: orgId,
-      receiptNo,
-      status: "PENDING",
-      paymentMethod: "MPESA",
-    },
-    include: { items: true },
-  });
-  if (!sale) return;
-
-  try {
-    if (status === "SUCCESS") {
-      await prisma.$transaction(async (tx) => {
-        await tx.sale.update({
-          where: { id: sale.id },
-          data: { status: "COMPLETED", mpesaReference: mpesaReceipt ?? null },
-        });
-        for (const item of sale.items) {
-          if (!item.productId) continue;
-          await tx.product.update({
-            where: { id: item.productId },
-            data: { stock: { decrement: item.quantity } },
-          });
-        }
-      });
-      logMpesa("callback.sale_completed", { saleId: sale.id });
-    } else {
-      await prisma.sale.update({
-        where: { id: sale.id },
-        data: { status: "CANCELLED" },
-      });
-      logMpesa("callback.sale_cancelled", { saleId: sale.id, status });
-    }
-  } catch (err) {
-    // Never fail the callback because of sale bookkeeping — Safaricom would
-    // retry and we'd risk double-processing the payment itself.
-    logMpesaError("callback.sale_settlement_failed", {
-      saleId: sale.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
 }
