@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Ledger - OMNI Infrastructure</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=IBM+Plex+Mono:wght@400;600&amp;family=Inter:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "inverse-primary": "#bec6e0",
+                      "primary-fixed": "#dae2fd",
+                      "secondary-fixed": "#dbe1ff",
+                      "primary-container": "#131b2e",
+                      "on-surface": "#1b1b1d",
+                      "surface-container-low": "#f6f3f5",
+                      "tertiary-container": "#271901",
+                      "outline-variant": "#c6c6cd",
+                      "tertiary-fixed-dim": "#dec29a",
+                      "primary": "#000000",
+                      "inverse-on-surface": "#f3f0f2",
+                      "secondary-fixed-dim": "#b4c5ff",
+                      "surface-container-highest": "#e4e2e4",
+                      "tertiary": "#000000",
+                      "surface-container": "#f0edef",
+                      "on-secondary-container": "#fefcff",
+                      "surface-tint": "#565e74",
+                      "on-tertiary": "#ffffff",
+                      "outline": "#76777d",
+                      "on-tertiary-fixed-variant": "#574425",
+                      "error-container": "#ffdad6",
+                      "on-secondary-fixed": "#00174b",
+                      "on-primary": "#ffffff",
+                      "inverse-surface": "#303032",
+                      "background": "#fcf8fa",
+                      "secondary": "#0051d5",
+                      "error": "#ba1a1a",
+                      "surface-dim": "#dcd9db",
+                      "on-surface-variant": "#45464d",
+                      "on-primary-fixed-variant": "#3f465c",
+                      "on-background": "#1b1b1d",
+                      "surface-container-high": "#eae7e9",
+                      "surface-variant": "#e4e2e4",
+                      "on-secondary-fixed-variant": "#003ea8",
+                      "surface-bright": "#fcf8fa",
+                      "on-secondary": "#ffffff",
+                      "on-tertiary-fixed": "#271901",
+                      "surface-container-lowest": "#ffffff",
+                      "on-tertiary-container": "#98805d",
+                      "on-error-container": "#93000a",
+                      "on-primary-fixed": "#131b2e",
+                      "on-error": "#ffffff",
+                      "surface": "#fcf8fa",
+                      "on-primary-container": "#7c839b",
+                      "tertiary-fixed": "#fcdeb5",
+                      "secondary-container": "#316bf3",
+                      "primary-fixed-dim": "#bec6e0"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "stack-loose": "2rem",
+                      "stack-compact": "0.5rem",
+                      "gutter": "1.5rem",
+                      "stack-default": "1rem",
+                      "container-max": "1440px",
+                      "sidebar-width": "260px"
+              },
+              "fontFamily": {
+                      "code-md": [
+                              "IBM Plex Mono"
+                      ],
+                      "code-sm": [
+                              "IBM Plex Mono"
+                      ],
+                      "display-lg": [
+                              "Geist"
+                      ],
+                      "headline-md": [
+                              "Geist"
+                      ],
+                      "label-caps": [
+                              "Inter"
+                      ],
+                      "body-md": [
+                              "Inter"
+                      ],
+                      "headline-sm": [
+                              "Geist"
+                      ],
+                      "body-sm": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "code-md": [
+                              "13px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "code-sm": [
+                              "11px",
+                              {
+                                      "lineHeight": "16px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-caps": [
+                              "11px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-md": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-sm": [
+                              "18px",
+                              {
+                                      "lineHeight": "24px",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "16px",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md antialiased min-h-screen flex">
+<!-- NavigationDrawer -->
+<nav class="fixed left-0 top-0 bottom-0 w-sidebar-width z-40 flex flex-col p-stack-default bg-surface-container-lowest border-r border-outline-variant">
+<div class="mb-stack-loose flex flex-col gap-2">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-surface-container-highest overflow-hidden flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface-variant">person</span>
+</div>
+<div>
+<h2 class="text-headline-sm font-headline-sm font-bold text-primary">Developer Console</h2>
+<p class="text-body-sm font-body-sm text-on-surface-variant">OMNI Infrastructure</p>
+<p class="text-code-sm font-code-sm text-outline">KES Wallet</p>
+</div>
+</div>
+</div>
+<ul class="flex flex-col gap-1 mt-stack-default">
+<li>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="text-label-caps font-label-caps">Dashboard</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="payments">payments</span>
+<span class="text-label-caps font-label-caps">Payments</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span class="text-label-caps font-label-caps">Customers</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-2 text-on-secondary-fixed-variant bg-secondary-fixed rounded-lg font-semibold scale-[0.99] transition-transform duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="account_balance_wallet" data-weight="fill" style="font-variation-settings: 'FILL' 1;">account_balance_wallet</span>
+<span class="text-label-caps font-label-caps">Ledgers</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="code">code</span>
+<span class="text-label-caps font-label-caps">Developers</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="text-label-caps font-label-caps">Settings</span>
+</a>
+</li>
+</ul>
+</nav>
+<!-- Main Content -->
+<main class="ml-sidebar-width flex-1 flex flex-col min-h-screen">
+<!-- TopAppBar -->
+<header class="sticky top-0 z-50 flex items-center justify-between w-full px-gutter h-16 bg-background border-b border-outline-variant">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-on-surface-variant">menu</span>
+<h1 class="text-headline-sm font-headline-sm font-bold text-primary tracking-tight">OMNI</h1>
+</div>
+<div class="flex items-center">
+<span class="px-3 py-1 bg-primary text-on-primary text-label-caps font-label-caps rounded-DEFAULT font-semibold">LIVE</span>
+</div>
+</header>
+<div class="p-gutter max-w-container-max mx-auto w-full flex-1 flex flex-col gap-stack-default">
+<!-- Page Header -->
+<div class="flex flex-col gap-1 mb-stack-default">
+<h2 class="text-headline-md font-headline-md text-primary">Ledger</h2>
+<p class="text-body-md font-body-md text-on-surface-variant">Immutable record of financial events.</p>
+</div>
+<!-- Filters -->
+<div class="flex flex-wrap gap-4 items-center bg-surface-container-lowest p-4 rounded-lg border border-outline-variant">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-outline">filter_list</span>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Filters</span>
+</div>
+<div class="flex items-center border border-outline-variant rounded-DEFAULT h-[36px] bg-background">
+<span class="pl-3 text-outline material-symbols-outlined text-[18px]">account_balance</span>
+<select class="bg-transparent border-none text-body-sm font-body-sm focus:ring-0 text-on-surface py-0 h-full pr-8">
+<option>All Accounts</option>
+<option>Operating</option>
+<option>Settlement</option>
+<option>Merchant Payable</option>
+</select>
+</div>
+<div class="flex items-center border border-outline-variant rounded-DEFAULT h-[36px] bg-background flex-1 min-w-[200px] max-w-md">
+<span class="pl-3 text-outline material-symbols-outlined text-[18px]">search</span>
+<input class="bg-transparent border-none text-body-sm font-body-sm focus:ring-0 text-on-surface py-0 h-full w-full" placeholder="Search Entry ID or Txn Hash" type="text"/>
+</div>
+</div>
+<!-- Table -->
+<div class="bg-surface-container-lowest rounded-lg border border-outline-variant overflow-hidden flex-1 flex flex-col">
+<div class="overflow-x-auto">
+<table class="w-full text-left whitespace-nowrap">
+<thead class="bg-surface-container-low border-b border-outline-variant text-label-caps font-label-caps text-on-surface-variant uppercase">
+<tr>
+<th class="px-4 py-3 font-semibold">Entry ID</th>
+<th class="px-4 py-3 font-semibold">Timestamp</th>
+<th class="px-4 py-3 font-semibold">Account</th>
+<th class="px-4 py-3 font-semibold text-right">Debit</th>
+<th class="px-4 py-3 font-semibold text-right">Credit</th>
+<th class="px-4 py-3 font-semibold text-right">Balance Impact</th>
+<th class="px-4 py-3 font-semibold text-center">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant text-body-md font-body-md">
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-4 py-3 font-code-md text-code-md text-primary">LED_9a8b7c6d</td>
+<td class="px-4 py-3 text-on-surface-variant font-code-sm text-code-sm">2023-10-27 14:32:01</td>
+<td class="px-4 py-3 text-on-surface">Settlement</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-on-surface-variant">-</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-primary">KES 50,000.00</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-secondary">+50,000.00</td>
+<td class="px-4 py-3 text-center">
+<span class="material-symbols-outlined text-[18px] text-outline" title="Immutable">lock</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-4 py-3 font-code-md text-code-md text-primary">LED_5e4f3a2b</td>
+<td class="px-4 py-3 text-on-surface-variant font-code-sm text-code-sm">2023-10-27 14:30:15</td>
+<td class="px-4 py-3 text-on-surface">Operating</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-primary">KES 1,500.00</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-on-surface-variant">-</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-error">-1,500.00</td>
+<td class="px-4 py-3 text-center">
+<span class="material-symbols-outlined text-[18px] text-outline" title="Immutable">lock</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-4 py-3 font-code-md text-code-md text-primary">LED_1c2d3e4f</td>
+<td class="px-4 py-3 text-on-surface-variant font-code-sm text-code-sm">2023-10-27 13:15:44</td>
+<td class="px-4 py-3 text-on-surface">Merchant Payable</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-on-surface-variant">-</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-primary">KES 12,450.50</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-secondary">+12,450.50</td>
+<td class="px-4 py-3 text-center">
+<span class="material-symbols-outlined text-[18px] text-outline" title="Immutable">lock</span>
+</td>
+</tr>
+<tr class="hover:bg-surface-container-low transition-colors">
+<td class="px-4 py-3 font-code-md text-code-md text-primary">LED_8g7h6i5j</td>
+<td class="px-4 py-3 text-on-surface-variant font-code-sm text-code-sm">2023-10-27 11:05:22</td>
+<td class="px-4 py-3 text-on-surface">Operating</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-primary">KES 250.00</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-on-surface-variant">-</td>
+<td class="px-4 py-3 text-right font-code-md text-code-md text-error">-250.00</td>
+<td class="px-4 py-3 text-center">
+<span class="material-symbols-outlined text-[18px] text-outline" title="Immutable">lock</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="p-4 border-t border-outline-variant bg-surface-container-low flex justify-between items-center">
+<span class="text-body-sm font-body-sm text-on-surface-variant">Showing 4 of 1,024 entries</span>
+<div class="flex gap-2">
+<button class="px-3 py-1 border border-outline-variant rounded-DEFAULT text-body-sm font-body-sm hover:bg-surface-container transition-colors disabled:opacity-50" disabled="">Prev</button>
+<button class="px-3 py-1 border border-outline-variant rounded-DEFAULT text-body-sm font-body-sm hover:bg-surface-container transition-colors">Next</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>

@@ -1,28 +1,59 @@
-import { requireAppContext } from "@/lib/auth";
-import { AppSidebar } from "@/components/layout/app-sidebar";
-import { AppTopbar } from "@/components/layout/app-topbar";
+import React from "react";
+import { requireTenantContext } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { OmniSidebar } from "@/components/layout/omni-sidebar";
+import { OmniTopbar } from "@/components/layout/omni-topbar";
+import { SandboxBanner } from "@/components/layout/sandbox-banner";
 
 export const dynamic = "force-dynamic";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const ctx = await requireAppContext();
+  const ctx = await requireTenantContext();
 
-  const shell = {
-    orgName: ctx.org.name,
-    tier: ctx.org.tier,
+  // Load available tenants and applications for switchers
+  const [tenants, applications] = await Promise.all([
+    prisma.tenant.findMany({
+      select: { id: true, name: true, slug: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.application.findMany({
+      where: { tenantId: ctx.tenant.id },
+      select: { id: true, name: true, slug: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
+
+  const shellProps = {
+    tenantName: ctx.tenant.name,
+    tenantSlug: ctx.tenant.slug,
+    applicationName: ctx.application.name,
+    applicationSlug: ctx.application.slug,
+    environment: ctx.environment,
+    role: ctx.tenantRole,
     userName: ctx.user.name,
     userEmail: ctx.user.email,
-    isDemo: ctx.user.isDemo,
+    availableTenants: tenants,
+    availableApplications: applications,
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <AppSidebar {...shell} />
-      <div className="flex min-h-screen flex-col md:pl-[248px]">
-        <AppTopbar {...shell} />
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          {children}
-        </main>
+    <div className="min-h-screen bg-background text-on-background antialiased flex flex-col">
+      {/* Global Sandbox Warning Banner */}
+      <SandboxBanner environment={ctx.environment} />
+
+      <div className="flex-1 flex overflow-hidden">
+        {/* Desktop Fixed Sidebar */}
+        <div className="hidden md:flex fixed left-0 top-0 bottom-0 z-40">
+          <OmniSidebar {...shellProps} />
+        </div>
+
+        {/* Main Content Area */}
+        <div className="flex-1 md:ml-sidebar-width flex flex-col min-h-screen w-full">
+          <OmniTopbar {...shellProps} />
+          <main className="flex-1 p-4 md:p-gutter max-w-container-max mx-auto w-full">
+            {children}
+          </main>
+        </div>
       </div>
     </div>
   );

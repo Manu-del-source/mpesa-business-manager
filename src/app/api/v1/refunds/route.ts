@@ -1,8 +1,10 @@
 import { type NextRequest } from "next/server";
 import { withApiKeyAuth, requirePermission, apiError } from "@/lib/middleware";
-import { createRefund, listRefunds } from "@/lib/refunds";
+import { createRefund } from "@/lib/refunds";
+import { prisma } from "@/lib/prisma";
 import { parseAmountMinor } from "@/lib/money";
 import { z } from "zod";
+import type { Prisma } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -43,6 +45,7 @@ const listRefundsQuerySchema = z.object({
     .min(1, "limit must be an integer between 1 and 100.")
     .max(100, "limit must be an integer between 1 and 100.")
     .default(50),
+  cursor: z.string().min(1).max(1024).optional(),
 });
 
 /**
@@ -61,6 +64,7 @@ export async function GET(request: NextRequest) {
     paymentId: url.searchParams.get("paymentId") ?? undefined,
     status: url.searchParams.get("status") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
+    cursor: url.searchParams.get("cursor") ?? undefined,
   });
   if (!parsedQuery.success) {
     return apiError({
@@ -71,16 +75,86 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const refunds = await listRefunds(
-    ctx.application.id,
-    ctx.environment,
-    parsedQuery.data,
-  );
+  const { paymentId, status, limit, cursor } = parsedQuery.data;
+
+  // Always scoped to the server-resolved application + environment, so a
+  // cursor or filter can never reach another tenant's refunds.
+  const where: Prisma.RefundWhereInput = {
+    applicationId: ctx.application.id,
+    environment: ctx.environment,
+  };
+  if (status) where.status = status;
+  if (paymentId) where.paymentId = paymentId;
+
+  if (cursor) {
+    // Resolve the cursor WITHIN the caller's scope — an id belonging to
+    // another application must not be usable as a pagination anchor.
+    const cursorItem = await prisma.refund.findFirst({
+      where: {
+        id: cursor,
+        applicationId: ctx.application.id,
+        environment: ctx.environment,
+      },
+      select: { id: true, createdAt: true },
+    });
+    if (!cursorItem) {
+      return apiError({
+        code: "VALIDATION_ERROR",
+        message: "Invalid pagination cursor.",
+        status: 422,
+      });
+    }
+    where.OR = [
+      { createdAt: { lt: cursorItem.createdAt } },
+      { createdAt: cursorItem.createdAt, id: { lt: cursorItem.id } },
+    ];
+  }
+
+  const refunds = await prisma.refund.findMany({
+    where,
+    include: {
+      payment: {
+        select: {
+          id: true,
+          reference: true,
+          amountMinor: true,
+          phone: true,
+          customerName: true,
+          status: true,
+        },
+      },
+    },
+    // Deterministic ordering: createdAt DESC, id DESC (matches the cursor).
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit + 1,
+  });
+
+  const hasMore = refunds.length > limit;
+  const page = hasMore ? refunds.slice(0, limit) : refunds;
+  const nextCursor = hasMore ? page[page.length - 1]?.id ?? null : null;
 
   return Response.json(
     {
-      data: refunds,
-      pagination: { limit: parsedQuery.data.limit },
+      data: page.map((r) => ({
+        id: r.id,
+        paymentId: r.paymentId,
+        paymentReference: r.payment.reference,
+        paymentAmountMinor: r.payment.amountMinor.toString(),
+        paymentStatus: r.payment.status,
+        customerPhone: r.payment.phone,
+        customerName: r.payment.customerName,
+        status: r.status,
+        amountMinor: r.amountMinor.toString(),
+        currency: r.currency,
+        reason: r.reason,
+        reference: r.reference,
+        idempotencyKey: r.idempotencyKey,
+        errorCode: r.errorCode,
+        errorMessage: r.errorMessage,
+        createdAt: r.createdAt.toISOString(),
+        processedAt: r.processedAt?.toISOString() ?? null,
+      })),
+      pagination: { hasMore, nextCursor, limit },
       meta: {
         requestId: ctx.requestId,
         environment: ctx.environment,

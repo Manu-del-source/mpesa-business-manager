@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Transaction Detail - OMNI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "inverse-primary": "#bec6e0",
+                      "primary-fixed": "#dae2fd",
+                      "secondary-fixed": "#dbe1ff",
+                      "primary-container": "#131b2e",
+                      "on-surface": "#1b1b1d",
+                      "surface-container-low": "#f6f3f5",
+                      "tertiary-container": "#271901",
+                      "outline-variant": "#c6c6cd",
+                      "tertiary-fixed-dim": "#dec29a",
+                      "primary": "#000000",
+                      "inverse-on-surface": "#f3f0f2",
+                      "secondary-fixed-dim": "#b4c5ff",
+                      "surface-container-highest": "#e4e2e4",
+                      "tertiary": "#000000",
+                      "surface-container": "#f0edef",
+                      "on-secondary-container": "#fefcff",
+                      "surface-tint": "#565e74",
+                      "on-tertiary": "#ffffff",
+                      "outline": "#76777d",
+                      "on-tertiary-fixed-variant": "#574425",
+                      "error-container": "#ffdad6",
+                      "on-secondary-fixed": "#00174b",
+                      "on-primary": "#ffffff",
+                      "inverse-surface": "#303032",
+                      "background": "#fcf8fa",
+                      "secondary": "#0051d5",
+                      "error": "#ba1a1a",
+                      "surface-dim": "#dcd9db",
+                      "on-surface-variant": "#45464d",
+                      "on-primary-fixed-variant": "#3f465c",
+                      "on-background": "#1b1b1d",
+                      "surface-container-high": "#eae7e9",
+                      "surface-variant": "#e4e2e4",
+                      "on-secondary-fixed-variant": "#003ea8",
+                      "surface-bright": "#fcf8fa",
+                      "on-secondary": "#ffffff",
+                      "on-tertiary-fixed": "#271901",
+                      "surface-container-lowest": "#ffffff",
+                      "on-tertiary-container": "#98805d",
+                      "on-error-container": "#93000a",
+                      "on-primary-fixed": "#131b2e",
+                      "on-error": "#ffffff",
+                      "surface": "#fcf8fa",
+                      "on-primary-container": "#7c839b",
+                      "tertiary-fixed": "#fcdeb5",
+                      "secondary-container": "#316bf3",
+                      "primary-fixed-dim": "#bec6e0"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "stack-loose": "2rem",
+                      "stack-compact": "0.5rem",
+                      "gutter": "1.5rem",
+                      "stack-default": "1rem",
+                      "container-max": "1440px",
+                      "sidebar-width": "260px"
+              },
+              "fontFamily": {
+                      "code-md": ["IBM Plex Mono"],
+                      "code-sm": ["IBM Plex Mono"],
+                      "display-lg": ["Geist"],
+                      "headline-md": ["Geist"],
+                      "label-caps": ["Inter"],
+                      "body-md": ["Inter"],
+                      "headline-sm": ["Geist"],
+                      "body-sm": ["Inter"]
+              },
+              "fontSize": {
+                      "code-md": ["13px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "code-sm": ["11px", {"lineHeight": "16px", "fontWeight": "400"}],
+                      "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                      "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}],
+                      "body-sm": ["12px", {"lineHeight": "16px", "fontWeight": "400"}]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined';
+            font-weight: normal;
+            font-style: normal;
+            font-size: 24px;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+            -webkit-font-feature-settings: 'liga';
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        .timeline-line {
+            position: absolute;
+            left: 11px;
+            top: 24px;
+            bottom: 0;
+            width: 2px;
+            background-color: theme('colors.outline-variant');
+            z-index: 0;
+        }
+        
+        .timeline-item:last-child .timeline-line {
+            display: none;
+        }
+        
+        .timeline-dot {
+            position: relative;
+            z-index: 1;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md h-screen overflow-hidden flex font-body-md text-body-md">
+<!-- Sidebar Navigation -->
+<nav class="fixed left-0 top-0 bottom-0 w-sidebar-width z-40 flex flex-col p-stack-default bg-surface-container-lowest dark:bg-surface-container-lowest border-r border-outline-variant hidden md:flex">
+<!-- Brand Header -->
+<div class="flex items-center gap-3 px-4 py-4 mb-6">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">widgets</span>
+<div class="flex flex-col">
+<span class="text-headline-sm font-headline-sm font-bold text-primary tracking-tight">OMNI</span>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider">Infrastructure</span>
+</div>
+</div>
+<!-- Navigation Links -->
+<div class="flex flex-col gap-1 flex-1">
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="text-body-md font-body-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-secondary-fixed-variant bg-secondary-fixed rounded-lg font-semibold shadow-[0px_1px_2px_rgba(0,0,0,0.05)]" href="#">
+<span class="material-symbols-outlined" data-icon="payments" style="font-variation-settings: 'FILL' 1;">payments</span>
+<span class="text-body-md font-body-md">Payments</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span class="text-body-md font-body-md">Customers</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="account_balance_wallet">account_balance_wallet</span>
+<span class="text-body-md font-body-md">Ledgers</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="code">code</span>
+<span class="text-body-md font-body-md">Developers</span>
+</a>
+</div>
+<!-- Footer / Settings -->
+<div class="mt-auto flex flex-col gap-1 pt-4 border-t border-outline-variant">
+<div class="flex items-center justify-between px-4 py-2 mb-2 bg-surface-container-low rounded-lg">
+<span class="text-body-sm font-body-sm text-on-surface-variant">Environment</span>
+<div class="flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+<span class="text-label-caps font-label-caps text-secondary font-semibold">Live</span>
+</div>
+</div>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="text-body-md font-body-md">Settings</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-0 md:ml-[260px] flex flex-col h-screen bg-background overflow-y-auto">
+<!-- Top App Bar (Mobile mainly, but provides contextual header on desktop) -->
+<header class="sticky top-0 z-30 flex items-center justify-between w-full px-gutter h-16 bg-surface-container-lowest border-b border-outline-variant md:px-8">
+<div class="flex items-center gap-4">
+<button class="md:hidden p-2 -ml-2 text-on-surface-variant hover:bg-surface-container rounded-lg">
+<span class="material-symbols-outlined" data-icon="menu">menu</span>
+</button>
+<div class="flex items-center gap-2">
+<a class="text-on-surface-variant hover:text-primary transition-colors flex items-center" href="#">
+<span class="material-symbols-outlined text-lg">arrow_back</span>
+</a>
+<div class="h-4 w-px bg-outline-variant mx-2"></div>
+<span class="text-headline-sm font-headline-sm font-semibold text-primary">Transaction Details</span>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low hover:bg-surface-container-high text-on-surface-variant rounded border border-outline-variant transition-colors">
+<span class="material-symbols-outlined text-sm">receipt_long</span>
+<span class="text-body-sm font-body-sm font-medium">Receipt</span>
+</button>
+<button class="flex items-center gap-2 px-3 py-1.5 bg-primary hover:bg-opacity-90 text-on-primary rounded transition-colors shadow-[0px_1px_2px_rgba(0,0,0,0.05)]">
+<span class="material-symbols-outlined text-sm">sync</span>
+<span class="text-body-sm font-body-sm font-medium">Refund</span>
+</button>
+</div>
+</header>
+<!-- Content Canvas -->
+<div class="p-gutter md:p-8 max-w-container-max mx-auto w-full">
+<!-- Page Header / Context -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<h1 class="text-headline-md font-headline-md text-primary font-bold">TXN_01H8XF9Q...</h1>
+<button class="p-1 text-on-surface-variant hover:text-primary transition-colors rounded hover:bg-surface-container-low">
+<span class="material-symbols-outlined text-sm">content_copy</span>
+</button>
+</div>
+<p class="text-body-sm font-body-sm text-on-surface-variant">Created on Oct 24, 2023, 14:32:01 EAT</p>
+</div>
+<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-[#166534] bg-[#F0FDF4] text-[#166534] shadow-sm">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span class="text-label-caps font-label-caps uppercase tracking-wider font-bold">Succeeded</span>
+</div>
+</div>
+<!-- Bento Grid Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+<!-- Left Column (Primary Details) -->
+<div class="lg:col-span-8 flex flex-col gap-6">
+<!-- Financials & Provider Info Card -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-6 flex flex-col gap-6">
+<!-- Financial Summary -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-6 border-b border-outline-variant">
+<div>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider block mb-1">Amount Settled</span>
+<div class="flex items-baseline gap-2">
+<span class="text-headline-sm font-headline-sm text-on-surface-variant font-medium">KES</span>
+<span class="text-display-lg font-display-lg font-code-md tracking-tight text-primary">10,000.00</span>
+</div>
+</div>
+<div class="flex gap-8">
+<div>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider block mb-1">Fee</span>
+<span class="text-body-md font-body-md font-code-md text-on-surface">KES 150.00</span>
+</div>
+<div>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider block mb-1">Net</span>
+<span class="text-body-md font-body-md font-code-md text-on-surface font-semibold">KES 9,850.00</span>
+</div>
+</div>
+</div>
+<!-- Provider Info -->
+<div>
+<h3 class="text-body-md font-body-md font-semibold text-primary mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">account_balance</span>
+                                Provider Details
+                            </h3>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-8">
+<div>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider block mb-1">Provider</span>
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded bg-[#4CAF50] flex items-center justify-center text-white text-[10px] font-bold">MP</div>
+<span class="text-body-md font-body-md text-on-surface font-medium">M-Pesa Daraja</span>
+</div>
+</div>
+<div>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider block mb-1">Receipt Number</span>
+<span class="text-body-md font-body-md font-code-md text-on-surface font-medium">ABC123XYZ</span>
+</div>
+<div>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider block mb-1">Checkout Request ID</span>
+<div class="flex items-center gap-2">
+<span class="text-body-md font-body-md font-code-md text-on-surface truncate w-32 sm:w-auto">ws_CO_24102023143201</span>
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined text-[14px]">content_copy</span></button>
+</div>
+</div>
+<div>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider block mb-1">Result Code</span>
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-[#166534]"></span>
+<span class="text-body-md font-body-md font-code-md text-on-surface">0 (Success)</span>
+</div>
+</div>
+<div>
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider block mb-1">Customer MSISDN</span>
+<span class="text-body-md font-body-md font-code-md text-on-surface">254712345678</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Ledger Impact Table -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden flex flex-col">
+<div class="px-6 py-4 border-b border-outline-variant bg-surface-container-low flex justify-between items-center">
+<h3 class="text-body-md font-body-md font-semibold text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">account_balance_wallet</span>
+                                Ledger Impact
+                            </h3>
+<a class="text-body-sm font-body-sm text-secondary hover:underline font-medium" href="#">View Ledger Entry</a>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-lowest border-b border-outline-variant">
+<th class="px-6 py-3 text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider font-medium">Account</th>
+<th class="px-6 py-3 text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider font-medium text-right">Debit</th>
+<th class="px-6 py-3 text-label-caps font-label-caps text-on-surface-variant uppercase tracking-wider font-medium text-right">Credit</th>
+</tr>
+</thead>
+<tbody>
+<tr class="border-b border-outline-variant hover:bg-[#F1F5F9] transition-colors group">
+<td class="px-6 py-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_downward</span>
+<span class="text-body-sm font-body-sm font-medium text-on-surface">Payment Clearing (Asset)</span>
+</div>
+</td>
+<td class="px-6 py-3 text-right">
+<span class="text-body-sm font-body-sm font-code-sm text-on-surface">KES 10,000.00</span>
+</td>
+<td class="px-6 py-3 text-right">
+<span class="text-body-sm font-body-sm font-code-sm text-outline-variant">-</span>
+</td>
+</tr>
+<tr class="hover:bg-[#F1F5F9] transition-colors group">
+<td class="px-6 py-3">
+<div class="flex items-center gap-2 ml-4">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant">arrow_upward</span>
+<span class="text-body-sm font-body-sm font-medium text-on-surface">Merchant Payable (Liability)</span>
+</div>
+</td>
+<td class="px-6 py-3 text-right">
+<span class="text-body-sm font-body-sm font-code-sm text-outline-variant">-</span>
+</td>
+<td class="px-6 py-3 text-right">
+<span class="text-body-sm font-body-sm font-code-sm text-on-surface">KES 10,000.00</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Request / Response Code Block (Metadata) -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden">
+<div class="px-6 py-4 border-b border-outline-variant flex justify-between items-center">
+<h3 class="text-body-md font-body-md font-semibold text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">data_object</span>
+                                Metadata
+                            </h3>
+</div>
+<div class="bg-[#1E293B] p-4 relative group">
+<div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="p-1.5 bg-[#334155] hover:bg-[#475569] text-white rounded border border-[#475569] transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">content_copy</span>
+<span class="text-code-sm font-code-sm text-[10px]">Copy</span>
+</button>
+</div>
+<pre class="text-code-sm font-code-sm text-[#E2E8F0] overflow-x-auto">{
+  "application_id": "app_9x2bV...qP",
+  "environment": "live",
+  "idempotency_key": "idemp_55f2a1b9-8c7...",
+  "source_ip": "196.201.216.42",
+  "user_agent": "omni-node-sdk/v2.1.4"
+}</pre>
+</div>
+</div>
+</div>
+<!-- Right Column (Timeline & Meta) -->
+<div class="lg:col-span-4 flex flex-col gap-6">
+<!-- Timeline Card -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-6">
+<h3 class="text-body-md font-body-md font-semibold text-primary mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">history</span>
+                            Transaction Timeline
+                        </h3>
+<div class="relative pl-1">
+<!-- Timeline Item 1 -->
+<div class="timeline-item relative pb-6">
+<div class="timeline-line"></div>
+<div class="flex items-start gap-4">
+<div class="timeline-dot w-6 h-6 rounded-full bg-surface-container-low border-2 border-[#166534] flex items-center justify-center mt-0.5 bg-white">
+<span class="material-symbols-outlined text-[12px] text-[#166534] font-bold" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<div>
+<p class="text-body-sm font-body-sm font-semibold text-primary">Payment Created</p>
+<p class="text-code-sm font-code-sm text-on-surface-variant mt-0.5">14:32:01.042 EAT</p>
+</div>
+</div>
+</div>
+<!-- Timeline Item 2 -->
+<div class="timeline-item relative pb-6">
+<div class="timeline-line"></div>
+<div class="flex items-start gap-4">
+<div class="timeline-dot w-6 h-6 rounded-full bg-surface-container-low border-2 border-[#166534] flex items-center justify-center mt-0.5 bg-white">
+<span class="material-symbols-outlined text-[12px] text-[#166534] font-bold" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<div>
+<p class="text-body-sm font-body-sm font-semibold text-primary">STK Push Initiated</p>
+<p class="text-code-sm font-code-sm text-on-surface-variant mt-0.5">14:32:01.890 EAT</p>
+</div>
+</div>
+</div>
+<!-- Timeline Item 3 -->
+<div class="timeline-item relative pb-6">
+<div class="timeline-line"></div>
+<div class="flex items-start gap-4">
+<div class="timeline-dot w-6 h-6 rounded-full bg-surface-container-low border-2 border-[#166534] flex items-center justify-center mt-0.5 bg-white">
+<span class="material-symbols-outlined text-[12px] text-[#166534] font-bold" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<div>
+<p class="text-body-sm font-body-sm font-semibold text-primary">Customer Prompted</p>
+<p class="text-code-sm font-code-sm text-on-surface-variant mt-0.5">14:32:04.112 EAT</p>
+</div>
+</div>
+</div>
+<!-- Timeline Item 4 -->
+<div class="timeline-item relative pb-6">
+<div class="timeline-line"></div>
+<div class="flex items-start gap-4">
+<div class="timeline-dot w-6 h-6 rounded-full bg-surface-container-low border-2 border-[#166534] flex items-center justify-center mt-0.5 bg-white">
+<span class="material-symbols-outlined text-[12px] text-[#166534] font-bold" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<div>
+<p class="text-body-sm font-body-sm font-semibold text-primary">Callback Received</p>
+<p class="text-code-sm font-code-sm text-on-surface-variant mt-0.5">14:32:18.455 EAT</p>
+<div class="mt-2 bg-surface-container p-2 rounded text-code-sm font-code-sm text-on-surface-variant border border-outline-variant">
+                                            Result: 0 - Success
+                                        </div>
+</div>
+</div>
+</div>
+<!-- Timeline Item 5 -->
+<div class="timeline-item relative">
+<div class="timeline-line"></div>
+<div class="flex items-start gap-4">
+<div class="timeline-dot w-6 h-6 rounded-full bg-[#166534] flex items-center justify-center mt-0.5 shadow-sm">
+<span class="material-symbols-outlined text-[14px] text-white font-bold" style="font-variation-settings: 'FILL' 1;">done_all</span>
+</div>
+<div>
+<p class="text-body-sm font-body-sm font-semibold text-primary">Confirmed &amp; Settled</p>
+<p class="text-code-sm font-code-sm text-on-surface-variant mt-0.5">14:32:18.502 EAT</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Webhooks / Delivery Status -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-6">
+<h3 class="text-body-md font-body-md font-semibold text-primary mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">webhook</span>
+                            Webhook Delivery
+                        </h3>
+<div class="flex items-center justify-between p-3 border border-outline-variant rounded bg-surface-container-low">
+<div class="flex items-center gap-3">
+<div class="w-2 h-2 rounded-full bg-[#166534]"></div>
+<div>
+<p class="text-body-sm font-body-sm font-medium text-primary">payment.succeeded</p>
+<p class="text-code-sm font-code-sm text-on-surface-variant mt-0.5">200 OK • 142ms</p>
+</div>
+</div>
+<button class="text-on-surface-variant hover:text-primary p-1">
+<span class="material-symbols-outlined text-[18px]">open_in_new</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<div class="h-12 w-full"></div> <!-- Bottom padding -->
+</div>
+</main>
+</body></html>

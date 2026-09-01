@@ -1,7 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { verifyApiKey, type VerifiedKey } from "@/lib/api-keys";
 import { prisma } from "@/lib/prisma";
-import { isValidPermission, type Permission } from "@/lib/permissions";
+import {
+  isValidPermission,
+  type Permission,
+  type TenantRoleName,
+} from "@/lib/permissions";
+import { resolvePermissions } from "@/lib/rbac";
+import { getCurrentUser, requireTenantContext } from "@/lib/tenant";
 import type { Environment } from "@/generated/prisma/client";
 
 // ---------------------------------------------------------------------------
@@ -9,16 +15,25 @@ import type { Environment } from "@/generated/prisma/client";
 // ---------------------------------------------------------------------------
 
 export type RequestContext = {
-  /** The verified API key metadata. */
-  apiKey: VerifiedKey;
-  /** Resolved tenant for the API key's application. */
+  /** The verified API key metadata (if authenticated via key). */
+  apiKey?: VerifiedKey;
+  /** Resolved tenant for the API key's application or session. */
   tenant: { id: string; name: string; slug: string };
   /** Resolved application. */
   application: { id: string; name: string; slug: string };
-  /** Active environment (from the API key — keys are environment-bound). */
+  /**
+   * Active environment. For API keys this comes from the key itself (keys are
+   * environment-bound); for session auth it comes from the x-environment
+   * header or the active-environment cookie.
+   */
   environment: Environment;
-  /** Resolved permissions for this key's scopes (registry-validated). */
+  /**
+   * Resolved permissions for this key's scopes or the user's tenant role.
+   * Always registry-validated — unknown scope strings are dropped.
+   */
   permissions: Permission[];
+  /** Tenant role if resolved via session. */
+  tenantRole?: TenantRoleName;
   /** Correlation ID for request tracing. */
   requestId: string;
 };
@@ -103,8 +118,12 @@ async function resolveContextFromKey(
 }
 
 /**
- * Main middleware function. Verifies the API key, resolves tenant context,
- * and checks permissions.
+ * Main middleware function. Verifies the API key or authenticated user session,
+ * resolves tenant context, and checks permissions.
+ *
+ * Supports:
+ * 1. Bearer API key in `Authorization: Bearer <key>` header
+ * 2. Authenticated user session (Supabase or Demo session) with tenant/application context
  *
  * Usage in route handlers:
  * ```ts
@@ -125,44 +144,101 @@ export async function withApiKeyAuth(
   const requestId = generateRequestId();
   const rawKey = extractBearerKey(request);
 
-  if (!rawKey) {
+  // -------------------------------------------------------------------------
+  // 1. API key authentication (machine-to-machine)
+  // -------------------------------------------------------------------------
+  if (rawKey) {
+    let verified: VerifiedKey | null;
+    try {
+      verified = await verifyApiKey(rawKey, {
+        requiredEnvironment: options?.requiredEnvironment,
+        requiredScopes: options?.requiredScopes,
+      });
+    } catch {
+      // Verification must fail closed — a database failure never becomes a
+      // "no key required" situation, nor a crash with a 500 stack trace.
+      return apiError(ERRORS.INTERNAL);
+    }
+
+    if (!verified) {
+      return apiError(ERRORS.UNAUTHORIZED);
+    }
+
+    let resolved: Omit<RequestContext, "apiKey" | "permissions" | "requestId"> | null;
+    try {
+      resolved = await resolveContextFromKey(verified);
+    } catch {
+      return apiError(ERRORS.INTERNAL);
+    }
+    if (!resolved) {
+      // Key points at an application that no longer exists.
+      return apiError(ERRORS.UNAUTHORIZED);
+    }
+
+    // Only registry-valid permissions enter the request context. Unknown
+    // scope strings stored on a key can never satisfy a permission check.
+    const permissions = verified.scopes.filter(isValidPermission);
+
+    return {
+      apiKey: verified,
+      ...resolved,
+      permissions,
+      requestId,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // 2. Session authentication (first-party dashboard requests)
+  // -------------------------------------------------------------------------
+  let tenantCtx: Awaited<ReturnType<typeof requireTenantContext>>;
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return apiError(ERRORS.UNAUTHORIZED);
+    }
+
+    tenantCtx = await requireTenantContext();
+  } catch {
+    // No session, or the session names a tenant the user cannot access.
     return apiError(ERRORS.UNAUTHORIZED);
   }
 
-  let verified: VerifiedKey | null;
+  // The environment header may only narrow to an explicit, known value; any
+  // other value falls back to the cookie-backed context environment (SANDBOX
+  // by default) rather than silently widening access.
+  const headerEnv = request.headers.get("x-environment")?.toUpperCase();
+  const activeEnv: Environment =
+    headerEnv === "LIVE" || headerEnv === "SANDBOX"
+      ? headerEnv
+      : tenantCtx.environment;
+
+  if (options?.requiredEnvironment && activeEnv !== options.requiredEnvironment) {
+    return apiError(ERRORS.FORBIDDEN);
+  }
+
+  // resolvePermissions fails closed: it throws on unexpected database errors
+  // rather than falling back to broad defaults, so deny on any failure.
+  let permissions: Permission[];
   try {
-    verified = await verifyApiKey(rawKey, {
-      requiredEnvironment: options?.requiredEnvironment,
-      requiredScopes: options?.requiredScopes,
-    });
+    permissions = await resolvePermissions(tenantCtx.tenantRole);
   } catch {
-    // Verification must fail closed — a database failure never becomes a
-    // "no key required" situation, nor a crash with a 500 stack trace.
     return apiError(ERRORS.INTERNAL);
   }
 
-  if (!verified) {
-    return apiError(ERRORS.UNAUTHORIZED);
+  if (options?.requiredScopes && options.requiredScopes.length > 0) {
+    const hasAll = options.requiredScopes.every(
+      (scope) => isValidPermission(scope) && permissions.includes(scope),
+    );
+    if (!hasAll) {
+      return apiError(ERRORS.FORBIDDEN);
+    }
   }
-
-  let resolved: Omit<RequestContext, "apiKey" | "permissions" | "requestId"> | null;
-  try {
-    resolved = await resolveContextFromKey(verified);
-  } catch {
-    return apiError(ERRORS.INTERNAL);
-  }
-  if (!resolved) {
-    // Key points at an application that no longer exists.
-    return apiError(ERRORS.UNAUTHORIZED);
-  }
-
-  // Only registry-valid permissions enter the request context. Unknown
-  // scope strings stored on a key can never satisfy a permission check.
-  const permissions = verified.scopes.filter(isValidPermission);
 
   return {
-    apiKey: verified,
-    ...resolved,
+    tenant: tenantCtx.tenant,
+    application: tenantCtx.application,
+    environment: activeEnv,
+    tenantRole: tenantCtx.tenantRole,
     permissions,
     requestId,
   };

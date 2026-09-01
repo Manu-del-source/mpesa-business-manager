@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OMNI Payments</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=IBM+Plex+Mono:wght@400&amp;family=Inter:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "inverse-primary": "#bec6e0",
+                        "primary-fixed": "#dae2fd",
+                        "secondary-fixed": "#dbe1ff",
+                        "primary-container": "#131b2e",
+                        "on-surface": "#1b1b1d",
+                        "surface-container-low": "#f6f3f5",
+                        "tertiary-container": "#271901",
+                        "outline-variant": "#c6c6cd",
+                        "tertiary-fixed-dim": "#dec29a",
+                        "primary": "#000000",
+                        "inverse-on-surface": "#f3f0f2",
+                        "secondary-fixed-dim": "#b4c5ff",
+                        "surface-container-highest": "#e4e2e4",
+                        "tertiary": "#000000",
+                        "surface-container": "#f0edef",
+                        "on-secondary-container": "#fefcff",
+                        "surface-tint": "#565e74",
+                        "on-tertiary": "#ffffff",
+                        "outline": "#76777d",
+                        "on-tertiary-fixed-variant": "#574425",
+                        "error-container": "#ffdad6",
+                        "on-secondary-fixed": "#00174b",
+                        "on-primary": "#ffffff",
+                        "inverse-surface": "#303032",
+                        "background": "#fcf8fa",
+                        "secondary": "#0051d5",
+                        "error": "#ba1a1a",
+                        "surface-dim": "#dcd9db",
+                        "on-surface-variant": "#45464d",
+                        "on-primary-fixed-variant": "#3f465c",
+                        "on-background": "#1b1b1d",
+                        "surface-container-high": "#eae7e9",
+                        "surface-variant": "#e4e2e4",
+                        "on-secondary-fixed-variant": "#003ea8",
+                        "surface-bright": "#fcf8fa",
+                        "on-secondary": "#ffffff",
+                        "on-tertiary-fixed": "#271901",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-container": "#98805d",
+                        "on-error-container": "#93000a",
+                        "on-primary-fixed": "#131b2e",
+                        "on-error": "#ffffff",
+                        "surface": "#fcf8fa",
+                        "on-primary-container": "#7c839b",
+                        "tertiary-fixed": "#fcdeb5",
+                        "secondary-container": "#316bf3",
+                        "primary-fixed-dim": "#bec6e0"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "stack-loose": "2rem",
+                        "stack-compact": "0.5rem",
+                        "gutter": "1.5rem",
+                        "stack-default": "1rem",
+                        "container-max": "1440px",
+                        "sidebar-width": "260px"
+                    },
+                    "fontFamily": {
+                        "code-md": ["IBM Plex Mono"],
+                        "code-sm": ["IBM Plex Mono"],
+                        "display-lg": ["Geist"],
+                        "headline-md": ["Geist"],
+                        "label-caps": ["Inter"],
+                        "body-md": ["Inter"],
+                        "headline-sm": ["Geist"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "code-md": ["13px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "code-sm": ["11px", { "lineHeight": "16px", "fontWeight": "400" }],
+                        "display-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "label-caps": ["11px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "headline-sm": ["18px", { "lineHeight": "24px", "fontWeight": "600" }],
+                        "body-sm": ["12px", { "lineHeight": "16px", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen flex selection:bg-secondary-fixed selection:text-on-secondary-fixed antialiased">
+<!-- Navigation Drawer (Sidebar for Desktop, Hidden on Mobile for this example, but structurally present) -->
+<nav class="hidden md:flex fixed left-0 top-0 bottom-0 w-sidebar-width z-40 flex-col p-stack-default bg-surface-container-lowest border-r border-outline-variant">
+<!-- Header / Profile area based on JSON rules -->
+<div class="mb-stack-loose flex items-center gap-3">
+<div class="w-10 h-10 rounded-full overflow-hidden bg-surface-container flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-on-surface-variant">person</span>
+</div>
+<div>
+<h2 class="text-label-caps font-label-caps text-on-surface">Developer Console</h2>
+<p class="text-body-sm font-body-sm text-on-surface-variant">OMNI Infrastructure</p>
+<p class="text-body-sm font-body-sm text-on-surface-variant">KES Wallet</p>
+</div>
+</div>
+<!-- Navigation Links -->
+<div class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="text-label-caps font-label-caps">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-secondary-fixed-variant bg-secondary-fixed rounded-lg font-semibold scale-[0.99] transition-transform duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="payments" style="font-variation-settings: 'FILL' 1;">payments</span>
+<span class="text-label-caps font-label-caps">Payments</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span class="text-label-caps font-label-caps">Customers</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="account_balance_wallet">account_balance_wallet</span>
+<span class="text-label-caps font-label-caps">Ledgers</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="code">code</span>
+<span class="text-label-caps font-label-caps">Developers</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 text-on-surface-variant hover:bg-surface-container rounded-lg" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="text-label-caps font-label-caps">Settings</span>
+</a>
+</div>
+<!-- Environment Switcher (Sandbox/Live) -->
+<div class="mt-auto border-t border-outline-variant pt-4">
+<div class="flex items-center justify-between px-2 py-2">
+<span class="text-body-sm font-body-sm text-on-surface-variant">Environment</span>
+<button class="flex items-center bg-surface-container rounded-full p-1 w-14 relative" id="env-toggle">
+<span class="w-6 h-6 rounded-full bg-secondary shadow-sm absolute left-1 transition-all duration-300"></span>
+<span class="w-full text-center text-[10px] text-on-surface-variant z-10 uppercase tracking-wider font-semibold pointer-events-none">Live</span>
+</button>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 md:ml-sidebar-width flex flex-col min-h-screen">
+<!-- TopAppBar (Mobile & Desktop adjustments) -->
+<header class="sticky top-0 z-50 flex items-center justify-between w-full px-gutter h-16 bg-background border-b border-outline-variant">
+<div class="flex items-center gap-4">
+<button class="md:hidden text-primary">
+<span class="material-symbols-outlined" data-icon="menu">menu</span>
+</button>
+<h1 class="text-headline-sm font-headline-sm font-bold text-primary tracking-tight">OMNI</h1>
+</div>
+<div class="flex items-center gap-4">
+<!-- Top Nav Action -->
+<button class="text-body-md font-body-md text-secondary font-semibold uppercase tracking-wider hover:bg-surface-container-low px-3 py-1.5 rounded transition-colors">
+                    LIVE
+                </button>
+</div>
+</header>
+<!-- Page Content -->
+<div class="p-gutter flex-1 flex flex-col max-w-container-max mx-auto w-full">
+<!-- Page Header -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-stack-loose">
+<div>
+<h1 class="text-headline-md font-headline-md text-on-surface mb-2">Payments</h1>
+<p class="text-body-md font-body-md text-on-surface-variant">Collect and monitor payment requests.</p>
+</div>
+<button class="bg-[#0F172A] text-white px-4 py-2 rounded-lg text-body-md font-body-md font-medium hover:bg-opacity-90 transition-opacity flex items-center gap-2 w-fit shadow-[0px_1px_2px_rgba(0,0,0,0.05)]">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                    Create Payment
+                </button>
+</div>
+<!-- Filters Area -->
+<div class="flex flex-wrap items-center gap-3 mb-stack-default">
+<!-- Search Input -->
+<div class="relative flex-1 min-w-[200px] max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">search</span>
+<input class="w-full h-10 pl-10 pr-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-body-md font-body-md placeholder:text-outline focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary transition-all" placeholder="Search by ID or reference..." type="text"/>
+</div>
+<!-- Status Filter -->
+<div class="relative min-w-[120px]">
+<select class="w-full h-10 pl-3 pr-8 appearance-none border border-outline-variant rounded-lg bg-surface-container-lowest text-body-md font-body-md focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary transition-all">
+<option value="">Status</option>
+<option value="succeeded">Succeeded</option>
+<option value="pending">Pending</option>
+<option value="failed">Failed</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-outline text-[18px]">expand_more</span>
+</div>
+<!-- Provider Filter -->
+<div class="relative min-w-[120px]">
+<select class="w-full h-10 pl-3 pr-8 appearance-none border border-outline-variant rounded-lg bg-surface-container-lowest text-body-md font-body-md focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary transition-all">
+<option value="">Provider</option>
+<option value="mpesa">M-Pesa</option>
+<option value="card">Card</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-outline text-[18px]">expand_more</span>
+</div>
+<!-- Date Filter -->
+<div class="relative min-w-[140px]">
+<input class="w-full h-10 px-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-body-md font-body-md focus:outline-none focus:border-secondary focus:ring-1 focus:ring-secondary transition-all text-on-surface-variant" type="date"/>
+</div>
+</div>
+<!-- Data Table Container -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex-1 flex flex-col">
+<div class="overflow-x-auto flex-1">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container text-on-surface-variant text-label-caps font-label-caps sticky top-0 z-10 uppercase tracking-wider">
+<tr>
+<th class="py-3 px-4 font-semibold border-b border-outline-variant">Payment ID</th>
+<th class="py-3 px-4 font-semibold border-b border-outline-variant text-right">Amount</th>
+<th class="py-3 px-4 font-semibold border-b border-outline-variant">Status</th>
+<th class="py-3 px-4 font-semibold border-b border-outline-variant">Provider</th>
+<th class="py-3 px-4 font-semibold border-b border-outline-variant">Created Time</th>
+<th class="py-3 px-4 font-semibold border-b border-outline-variant w-10"></th>
+</tr>
+</thead>
+<tbody class="text-body-md font-body-md text-on-surface">
+<!-- Row 1 (Succeeded) -->
+<tr class="border-b border-outline-variant hover:bg-[#F1F5F9] transition-colors group">
+<td class="py-3 px-4 font-code-md text-code-md text-on-surface-variant">PAY_1a2b3c4d</td>
+<td class="py-3 px-4 font-code-md text-code-md text-right">KES 5,000.00</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm border border-emerald-500/30 bg-emerald-50/50 text-emerald-700 text-label-caps font-label-caps uppercase">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+                                        Succeeded
+                                    </span>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded bg-emerald-100 flex items-center justify-center text-emerald-800 text-[10px] font-bold">M</div>
+<span class="text-body-sm font-body-sm">M-Pesa</span>
+</div>
+</td>
+<td class="py-3 px-4 text-on-surface-variant text-body-sm font-body-sm">2023-10-27 14:32:01</td>
+<td class="py-3 px-4 text-right">
+<button class="text-outline hover:text-on-surface transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 2 (Pending) -->
+<tr class="border-b border-outline-variant hover:bg-[#F1F5F9] transition-colors group">
+<td class="py-3 px-4 font-code-md text-code-md text-on-surface-variant">PAY_9f8e7d6c</td>
+<td class="py-3 px-4 font-code-md text-code-md text-right">KES 1,250.00</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm border border-amber-500/30 bg-amber-50/50 text-amber-700 text-label-caps font-label-caps uppercase">
+<span class="material-symbols-outlined text-[14px]">schedule</span>
+                                        Pending
+                                    </span>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded bg-emerald-100 flex items-center justify-center text-emerald-800 text-[10px] font-bold">M</div>
+<span class="text-body-sm font-body-sm">M-Pesa</span>
+</div>
+</td>
+<td class="py-3 px-4 text-on-surface-variant text-body-sm font-body-sm">2023-10-27 14:28:44</td>
+<td class="py-3 px-4 text-right">
+<button class="text-outline hover:text-on-surface transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+<!-- Row 3 (Failed) -->
+<tr class="border-b border-outline-variant hover:bg-[#F1F5F9] transition-colors group">
+<td class="py-3 px-4 font-code-md text-code-md text-on-surface-variant">PAY_5g6h7j8k</td>
+<td class="py-3 px-4 font-code-md text-code-md text-right">KES 10,000.00</td>
+<td class="py-3 px-4">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm border border-red-500/30 bg-red-50/50 text-red-700 text-label-caps font-label-caps uppercase">
+<span class="material-symbols-outlined text-[14px]">error</span>
+                                        Failed
+                                    </span>
+</td>
+<td class="py-3 px-4">
+<div class="flex items-center gap-2">
+<div class="w-6 h-6 rounded bg-emerald-100 flex items-center justify-center text-emerald-800 text-[10px] font-bold">M</div>
+<span class="text-body-sm font-body-sm">M-Pesa</span>
+</div>
+</td>
+<td class="py-3 px-4 text-on-surface-variant text-body-sm font-body-sm">2023-10-27 13:15:10</td>
+<td class="py-3 px-4 text-right">
+<button class="text-outline hover:text-on-surface transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination / Footer area -->
+<div class="p-3 border-t border-outline-variant bg-surface-container flex items-center justify-between text-body-sm font-body-sm text-on-surface-variant">
+<span>Showing 1 to 3 of 42 results</span>
+<div class="flex gap-1">
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors" disabled="">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded bg-surface-container-lowest border border-outline-variant font-medium">1</button>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors">2</button>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors">3</button>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<script>
+        // Simple logic for the environment toggle
+        const envToggle = document.getElementById('env-toggle');
+        let isLive = true;
+
+        envToggle.addEventListener('click', () => {
+            isLive = !isLive;
+            const indicator = envToggle.querySelector('span:first-child');
+            const label = envToggle.querySelector('span:last-child');
+            
+            if (isLive) {
+                indicator.classList.remove('translate-x-6', 'bg-amber-500');
+                indicator.classList.add('bg-secondary');
+                label.textContent = 'Live';
+                // Remove banner if exists
+                const banner = document.getElementById('sandbox-banner');
+                if(banner) banner.remove();
+            } else {
+                indicator.classList.add('translate-x-6', 'bg-amber-500');
+                indicator.classList.remove('bg-secondary');
+                label.textContent = 'Test';
+                
+                // Add Sandbox banner
+                if(!document.getElementById('sandbox-banner')) {
+                    const banner = document.createElement('div');
+                    banner.id = 'sandbox-banner';
+                    banner.className = 'fixed top-0 left-0 w-full bg-amber-500 text-amber-950 text-label-caps font-label-caps py-1 text-center z-[60] font-bold tracking-widest uppercase';
+                    banner.textContent = 'Sandbox Environment Active';
+                    document.body.prepend(banner);
+                }
+            }
+        });
+    </script>
+</body></html>

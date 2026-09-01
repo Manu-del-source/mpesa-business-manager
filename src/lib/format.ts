@@ -44,6 +44,24 @@ export function formatKESExact(value: Money): string {
   return kesExactFormatter.format(toNumber(value));
 }
 
+/**
+ * Format exact integer minor-unit values from backend (e.g. 1000000 -> "KES 10,000.00")
+ * Uses integer division and remainder to avoid floating-point inaccuracies.
+ */
+export function formatMinorUnits(amountMinor: bigint | string | number | null | undefined, currency = "KES"): string {
+  if (amountMinor === null || amountMinor === undefined) return `${currency} 0.00`;
+  const minor = BigInt(typeof amountMinor === "number" ? Math.round(amountMinor) : amountMinor);
+  const isNegative = minor < 0n;
+  const absMinor = isNegative ? -minor : minor;
+  const whole = absMinor / 100n;
+  const cents = absMinor % 100n;
+
+  const wholeStr = whole.toLocaleString("en-US");
+  const centsStr = cents.toString().padStart(2, "0");
+
+  return `${isNegative ? "-" : ""}${currency} ${wholeStr}.${centsStr}`;
+}
+
 /** 12 Aug 2026 */
 export function formatDate(date: Date | string): string {
   return format(new Date(date), "d MMM yyyy");
