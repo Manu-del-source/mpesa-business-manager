@@ -10,15 +10,63 @@
    =========================================================================== */
 
 :root {
+  /* Stitch OMNI Financial Infrastructure tokens */
+  --omni-surface: #fcf8fa;
+  --omni-surface-dim: #dcd9db;
+  --omni-surface-bright: #fcf8fa;
+  --omni-surface-container-lowest: #ffffff;
+  --omni-surface-container-low: #f6f3f5;
+  --omni-surface-container: #f0edef;
+  --omni-surface-container-high: #eae7e9;
+  --omni-surface-container-highest: #e4e2e4;
+  --omni-on-surface: #1b1b1d;
+  --omni-on-surface-variant: #45464d;
+  --omni-inverse-surface: #303032;
+  --omni-inverse-on-surface: #f3f0f2;
+  --omni-outline: #76777d;
+  --omni-outline-variant: #c6c6cd;
+  --omni-surface-tint: #565e74;
+  --omni-primary: #000000;
+  --omni-on-primary: #ffffff;
+  --omni-primary-container: #131b2e;
+  --omni-on-primary-container: #7c839b;
+  --omni-inverse-primary: #bec6e0;
+  --omni-secondary: #0051d5;
+  --omni-on-secondary: #ffffff;
+  --omni-secondary-container: #316bf3;
+  --omni-on-secondary-container: #fefcff;
+  --omni-tertiary: #000000;
+  --omni-on-tertiary: #ffffff;
+  --omni-tertiary-container: #271901;
+  --omni-on-tertiary-container: #98805d;
+  --omni-error: #ba1a1a;
+  --omni-on-error: #ffffff;
+  --omni-error-container: #ffdad6;
+  --omni-on-error-container: #93000a;
+  --omni-primary-fixed: #dae2fd;
+  --omni-primary-fixed-dim: #bec6e0;
+  --omni-on-primary-fixed: #131b2e;
+  --omni-on-primary-fixed-variant: #3f465c;
+  --omni-secondary-fixed: #dbe1ff;
+  --omni-secondary-fixed-dim: #b4c5ff;
+  --omni-on-secondary-fixed: #00174b;
+  --omni-on-secondary-fixed-variant: #003ea8;
+  --omni-tertiary-fixed: #fcdeb5;
+  --omni-tertiary-fixed-dim: #dec29a;
+  --omni-on-tertiary-fixed: #271901;
+  --omni-on-tertiary-fixed-variant: #574425;
+  --omni-background: #fcf8fa;
+  --omni-on-background: #1b1b1d;
+
   /* Base surfaces — warm-neutral greys, not pure white, to cut glare. */
-  --background: oklch(0.985 0.002 285);
-  --surface: oklch(0.972 0.003 285);
-  --foreground: oklch(0.21 0.01 285);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.01 285);
-  --elevated: oklch(1 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.01 285);
+  --background: #fcf8fa;
+  --surface: #f6f3f5;
+  --foreground: #1b1b1d;
+  --card: #ffffff;
+  --card-foreground: #1b1b1d;
+  --elevated: #ffffff;
+  --popover: #ffffff;
+  --popover-foreground: #1b1b1d;
 
   --primary: oklch(0.62 0.16 149);
   --primary-foreground: oklch(0.99 0.005 150);
@@ -171,6 +219,47 @@
   --color-brand-900: var(--brand-900);
   --color-brand-950: var(--brand-950);
 
+  --color-surface-container-lowest: var(--omni-surface-container-lowest);
+  --color-surface-container-low: var(--omni-surface-container-low);
+  --color-surface-container: var(--omni-surface-container);
+  --color-surface-container-high: var(--omni-surface-container-high);
+  --color-surface-container-highest: var(--omni-surface-container-highest);
+  --color-surface-dim: var(--omni-surface-dim);
+  --color-surface-bright: var(--omni-surface-bright);
+  --color-on-surface: var(--omni-on-surface);
+  --color-on-surface-variant: var(--omni-on-surface-variant);
+  --color-inverse-surface: var(--omni-inverse-surface);
+  --color-inverse-on-surface: var(--omni-inverse-on-surface);
+  --color-outline: var(--omni-outline);
+  --color-outline-variant: var(--omni-outline-variant);
+  --color-surface-tint: var(--omni-surface-tint);
+  --color-primary-container: var(--omni-primary-container);
+  --color-on-primary-container: var(--omni-on-primary-container);
+  --color-inverse-primary: var(--omni-inverse-primary);
+  --color-secondary-container: var(--omni-secondary-container);
+  --color-on-secondary-container: var(--omni-on-secondary-container);
+  --color-primary-fixed: var(--omni-primary-fixed);
+  --color-primary-fixed-dim: var(--omni-primary-fixed-dim);
+  --color-on-primary-fixed: var(--omni-on-primary-fixed);
+  --color-on-primary-fixed-variant: var(--omni-on-primary-fixed-variant);
+  --color-secondary-fixed: var(--omni-secondary-fixed);
+  --color-secondary-fixed-dim: var(--omni-secondary-fixed-dim);
+  --color-on-secondary-fixed: var(--omni-on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--omni-on-secondary-fixed-variant);
+  --color-tertiary-fixed: var(--omni-tertiary-fixed);
+  --color-tertiary-fixed-dim: var(--omni-tertiary-fixed-dim);
+  --color-on-tertiary-fixed: var(--omni-on-tertiary-fixed);
+  --color-on-tertiary-fixed-variant: var(--omni-on-tertiary-fixed-variant);
+  --color-error-container: var(--omni-error-container);
+  --color-on-error-container: var(--omni-on-error-container);
+
+  --spacing-sidebar-width: 260px;
+  --spacing-gutter: 1.5rem;
+  --spacing-stack-loose: 2rem;
+  --spacing-stack-default: 1rem;
+  --spacing-stack-compact: 0.5rem;
+  --spacing-container-max: 1440px;
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -191,6 +280,104 @@
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
   --shadow-glow: var(--shadow-glow);
+}
+
+/* --------------------------------------------------------------------------
+   Stitch OMNI Typography & Components
+   -------------------------------------------------------------------------- */
+
+.font-display-lg,
+.text-display-lg {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 32px;
+  line-height: 40px;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+.font-headline-md,
+.text-headline-md {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 24px;
+  line-height: 32px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.font-headline-sm,
+.text-headline-sm {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.font-body-md,
+.text-body-md {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
+.font-body-sm,
+.text-body-sm {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}
+
+.font-label-caps,
+.text-label-caps {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.font-code-md,
+.text-code-md {
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.font-code-sm,
+.text-code-sm {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-area {
+  background: linear-gradient(180deg, rgba(49, 107, 243, 0.1) 0%, rgba(49, 107, 243, 0) 100%);
+  border-top: 2px solid #316bf3;
+}
+
+.timeline-line {
+  position: absolute;
+  left: 11px;
+  top: 24px;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--omni-outline-variant, #c6c6cd);
+  z-index: 0;
+}
+
+.timeline-item:last-child .timeline-line {
+  display: none;
+}
+
+.timeline-dot {
+  position: relative;
+  z-index: 1;
 }
 
 /* --------------------------------------------------------------------------

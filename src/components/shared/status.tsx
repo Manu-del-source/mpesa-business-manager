@@ -62,3 +62,34 @@ export function ExpenseCategoryBadge({ category }: { category: string }) {
     <Badge variant="secondary">{EXPENSE_CATEGORY_LABELS[category] ?? category}</Badge>
   );
 }
+
+/**
+ * Generic status badge for infrastructure resources (payments, payouts,
+ * refunds, journal transactions…). Unknown statuses render neutrally rather
+ * than throwing, so a new backend status never breaks the console.
+ */
+export function StatusBadge({ status }: { status: string }) {
+  const key = (status ?? "").toUpperCase();
+
+  const variants: Record<string, string> = {
+    SUCCEEDED: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    COMPLETED: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    ACTIVE: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    PENDING: "bg-amber-100 text-amber-800 border-amber-200",
+    PROCESSING: "bg-blue-100 text-blue-800 border-blue-200",
+    FAILED: "bg-red-100 text-red-800 border-red-200",
+    CANCELLED: "bg-neutral-100 text-neutral-700 border-neutral-200",
+    VOIDED: "bg-neutral-100 text-neutral-700 border-neutral-200",
+  };
+
+  const className = variants[key] ?? "bg-neutral-100 text-neutral-700 border-neutral-200";
+  const label = key ? key.charAt(0) + key.slice(1).toLowerCase() : "Unknown";
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
+    >
+      {label}
+    </span>
+  );
+}

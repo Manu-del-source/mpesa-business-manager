@@ -41,7 +41,7 @@ export type ApplyAllocationInput = {
 // Exact rounding on BigInt amounts
 // ---------------------------------------------------------------------------
 
-type RoundingMode = "HALF_UP" | "HALF_DOWN" | "TRUNCATE" | "CEIL";
+export type RoundingMode = "HALF_UP" | "HALF_DOWN" | "TRUNCATE" | "CEIL";
 
 /**
  * Divide `numerator` by `denominator` (both non-negative BigInts) with the
@@ -296,4 +296,165 @@ export async function applyAllocationToPayment(
   });
 
   return computed;
+}
+
+// ---------------------------------------------------------------------------
+// Rule management
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a split set before it is persisted.
+ *
+ * Splits are validated by running them through computeAllocations() against a
+ * representative amount, so a rule can never be stored in a shape the
+ * allocation engine would later reject at payment time.
+ */
+function assertValidSplits(splits: SplitDefinition[]): void {
+  if (splits.length === 0) {
+    throw new AllocationRuleValidationError("A rule needs at least one split.");
+  }
+  const allPercentage = splits.every((s) => s.type === "percentage");
+  const allFixed = splits.every((s) => s.type === "fixed");
+  if (!allPercentage && !allFixed) {
+    throw new AllocationRuleValidationError(
+      "Mixed splits are not supported: use all-percentage or all-fixed.",
+    );
+  }
+  try {
+    // 1_000_000 minor units is large enough to exercise the rounding paths.
+    computeAllocations(1_000_000n, splits);
+  } catch (err) {
+    throw new AllocationRuleValidationError(
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+export class AllocationRuleValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AllocationRuleValidationError";
+  }
+}
+
+/**
+ * Verify every split targets an account that exists, is active, and belongs
+ * to THIS application + environment. Without this check a rule could route
+ * money into another tenant's account.
+ */
+async function assertAccountsInScope(
+  splits: SplitDefinition[],
+  applicationId: string,
+  environment: Environment,
+): Promise<void> {
+  const accountIds = [...new Set(splits.map((s) => s.accountId))];
+  const accounts = await prisma.account.findMany({
+    where: { id: { in: accountIds }, applicationId, environment, isActive: true },
+    select: { id: true },
+  });
+  const found = new Set(accounts.map((a) => a.id));
+  const missing = accountIds.filter((id) => !found.has(id));
+  if (missing.length > 0) {
+    throw new AllocationRuleValidationError(
+      `Unknown or inactive account(s) for this application/environment: ${missing.join(", ")}.`,
+    );
+  }
+}
+
+/**
+ * Create a new allocation rule together with its first version (atomically).
+ */
+export async function createAllocationRule(params: {
+  applicationId: string;
+  environment: Environment;
+  name: string;
+  description?: string;
+  priority?: number;
+  splits: SplitDefinition[];
+  roundingMode?: RoundingMode;
+}) {
+  assertValidSplits(params.splits);
+  await assertAccountsInScope(params.splits, params.applicationId, params.environment);
+
+  return prisma.$transaction(async (tx) => {
+    const rule = await tx.allocationRule.create({
+      data: {
+        applicationId: params.applicationId,
+        environment: params.environment,
+        name: params.name,
+        description: params.description ?? null,
+        priority: params.priority ?? 0,
+      },
+    });
+
+    await tx.allocationRuleVersion.create({
+      data: {
+        allocationRuleId: rule.id,
+        version: 1,
+        splits: params.splits as unknown as Record<string, unknown>,
+        roundingMode: params.roundingMode ?? "HALF_UP",
+      },
+    });
+
+    return rule;
+  });
+}
+
+/**
+ * Create a new version of an existing allocation rule.
+ *
+ * The rule is resolved WITHIN the caller's application + environment, so a
+ * rule id belonging to another tenant cannot be versioned. Version numbering
+ * happens inside the transaction to avoid a duplicate-version race.
+ */
+export async function createRuleVersion(
+  ruleId: string,
+  applicationId: string,
+  environment: Environment,
+  splits: SplitDefinition[],
+  roundingMode: RoundingMode = "HALF_UP",
+) {
+  assertValidSplits(splits);
+  await assertAccountsInScope(splits, applicationId, environment);
+
+  return prisma.$transaction(async (tx) => {
+    const rule = await tx.allocationRule.findFirst({
+      where: { id: ruleId, applicationId, environment },
+      select: { id: true },
+    });
+    if (!rule) {
+      throw new AllocationRuleValidationError("Allocation rule not found.");
+    }
+
+    const latest = await tx.allocationRuleVersion.findFirst({
+      where: { allocationRuleId: rule.id },
+      orderBy: { version: "desc" },
+      select: { version: true },
+    });
+
+    return tx.allocationRuleVersion.create({
+      data: {
+        allocationRuleId: rule.id,
+        version: (latest?.version ?? 0) + 1,
+        splits: splits as unknown as Record<string, unknown>,
+        roundingMode,
+      },
+    });
+  });
+}
+
+/**
+ * List allocation rules (with their versions) for an application+environment.
+ */
+export async function listAllocationRules(
+  applicationId: string,
+  environment: Environment,
+) {
+  return prisma.allocationRule.findMany({
+    where: { applicationId, environment },
+    include: {
+      versions: { orderBy: { version: "desc" } },
+    },
+    orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+  });
 }
