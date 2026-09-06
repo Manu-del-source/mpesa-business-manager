@@ -1,5 +1,73 @@
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 
+/**
+ * Generic financial-operation status badge — used across Payments, Payouts,
+ * Refunds, Journal/Ledger, Reconciliation, Webhooks, etc. Backend state
+ * machines are the source of truth; this only maps their string states to
+ * a consistent visual treatment.
+ */
+const FINANCIAL_STATUS_STYLES: Record<string, BadgeProps["variant"]> = {
+  SUCCEEDED: "success",
+  SUCCESS: "success",
+  MATCHED: "success",
+  SENT: "success",
+  COMPLETED: "success",
+  ACTIVE: "success",
+  PENDING: "warning",
+  PROCESSING: "info",
+  RUNNING: "info",
+  FAILED: "destructive",
+  ERROR: "destructive",
+  CANCELLED: "muted",
+  CANCELED: "muted",
+  REFUNDED: "secondary",
+  DISCREPANCY: "destructive",
+  UNMATCHED: "destructive",
+  REVOKED: "muted",
+  EXPIRED: "muted",
+  VOIDED: "muted",
+};
+
+const FINANCIAL_STATUS_ICONS: Record<string, string> = {
+  SUCCEEDED: "check_circle",
+  SUCCESS: "check_circle",
+  MATCHED: "check_circle",
+  SENT: "check_circle",
+  COMPLETED: "check_circle",
+  PENDING: "schedule",
+  PROCESSING: "autorenew",
+  RUNNING: "autorenew",
+  FAILED: "error",
+  ERROR: "error",
+  CANCELLED: "block",
+  CANCELED: "block",
+  REFUNDED: "sync",
+  DISCREPANCY: "warning",
+  UNMATCHED: "warning",
+  REVOKED: "block",
+  EXPIRED: "schedule",
+  VOIDED: "block",
+};
+
+function toTitleCase(status: string): string {
+  return status
+    .toLowerCase()
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+export function StatusBadge({ status, showIcon = true }: { status: string; showIcon?: boolean }) {
+  const key = status?.toUpperCase() ?? "";
+  const icon = FINANCIAL_STATUS_ICONS[key];
+  return (
+    <Badge variant={FINANCIAL_STATUS_STYLES[key] ?? "secondary"} className="uppercase tracking-wide">
+      {showIcon && icon && <span className="material-symbols-outlined text-[14px]">{icon}</span>}
+      {toTitleCase(status ?? "unknown")}
+    </Badge>
+  );
+}
+
 const SALE_STATUS_STYLES: Record<string, BadgeProps["variant"]> = {
   COMPLETED: "success",
   PENDING: "warning",
