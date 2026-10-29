@@ -101,6 +101,9 @@ export function callbackBaseUrl(): string {
 }
 
 export function assertDatabaseConfigured(): void {
+  if (isProduction() && isDemoMode()) {
+    throw new Error("CRITICAL SECURITY ERROR: DEMO_MODE=true cannot be enabled in a production environment (NODE_ENV=production).");
+  }
   if (!env.databaseUrl) {
     throw new Error(
       "DATABASE_URL is not configured. Start PostgreSQL and set DATABASE_URL in .env.",
