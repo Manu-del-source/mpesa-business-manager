@@ -384,7 +384,7 @@ export function OmniPaymentDetailView({
         actionName="Cancel Payment"
         environment={environment}
         applicationName={applicationName}
-        amountMinor={data.amountMinor}
+        amountMinor={data.amountMinor == null ? undefined : BigInt(data.amountMinor)}
         recipient={data.customerName || formatPhone(data.phone) || undefined}
         consequences="Cancelling a LIVE payment stops further processing but cannot reverse funds already settled."
         onConfirm={doCancel}
