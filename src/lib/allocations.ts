@@ -1,4 +1,5 @@
 import "server-only";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { Environment } from "@/generated/prisma/client";
 
@@ -349,7 +350,7 @@ async function assertAccountsInScope(
 ): Promise<void> {
   const accountIds = [...new Set(splits.map((s) => s.accountId))];
   const accounts = await prisma.account.findMany({
-    where: { id: { in: accountIds }, applicationId, environment, isActive: true },
+    where: { id: { in: accountIds }, applicationId, environment, active: true },
     select: { id: true },
   });
   const found = new Set(accounts.map((a) => a.id));
@@ -391,7 +392,7 @@ export async function createAllocationRule(params: {
       data: {
         allocationRuleId: rule.id,
         version: 1,
-        splits: params.splits as unknown as Record<string, unknown>,
+        splits: params.splits as unknown as Prisma.InputJsonValue,
         roundingMode: params.roundingMode ?? "HALF_UP",
       },
     });
@@ -436,7 +437,7 @@ export async function createRuleVersion(
       data: {
         allocationRuleId: rule.id,
         version: (latest?.version ?? 0) + 1,
-        splits: splits as unknown as Record<string, unknown>,
+        splits: splits as unknown as Prisma.InputJsonValue,
         roundingMode,
       },
     });

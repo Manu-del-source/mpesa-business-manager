@@ -3,7 +3,7 @@ import { withApiKeyAuth, requirePermission, apiError } from "@/lib/middleware";
 import { prisma } from "@/lib/prisma";
 import { resolvePermissions, PERMISSIONS } from "@/lib/rbac";
 import { z } from "zod";
-import type { TenantRole } from "@/generated/prisma";
+import type { TenantRole } from "@/generated/prisma/enums";
 
 const inviteMemberSchema = z.object({
   email: z.string().email(),

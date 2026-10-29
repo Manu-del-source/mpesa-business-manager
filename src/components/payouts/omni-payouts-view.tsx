@@ -279,7 +279,7 @@ export function OmniPayoutsView({
         actionName="Cancel Payout"
         environment={environment}
         applicationName={applicationName}
-        amountMinor={cancelTarget?.amountMinor}
+        amountMinor={cancelTarget?.amountMinor == null ? undefined : BigInt(cancelTarget.amountMinor)}
         recipient={cancelTarget?.recipientName || (cancelTarget ? formatPhone(cancelTarget.recipientPhone) : undefined)}
         consequences="Cancelling only stops payouts that have not yet been sent to the provider."
         onConfirm={doCancel}

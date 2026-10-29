@@ -57,7 +57,7 @@ function toTitleCase(status: string): string {
     .join(" ");
 }
 
-export function StatusBadge({ status, showIcon = true }: { status: string; showIcon?: boolean }) {
+export function FinancialStatusBadge({ status, showIcon = true }: { status: string; showIcon?: boolean }) {
   const key = status?.toUpperCase() ?? "";
   const icon = FINANCIAL_STATUS_ICONS[key];
   return (

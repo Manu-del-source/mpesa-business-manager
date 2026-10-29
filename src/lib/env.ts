@@ -66,6 +66,14 @@ export const env = {
 } as const;
 
 export function isDemoMode(): boolean {
+  if (env.demoMode && env.nodeEnv === "production") {
+    // Fail closed: demo mode bypasses authentication, so it must never be
+    // honored in a production runtime. Refuse instead of silently weakening.
+    throw new Error(
+      "DEMO_MODE=true is not allowed with NODE_ENV=production. " +
+        "Unset DEMO_MODE or change NODE_ENV.",
+    );
+  }
   return env.demoMode;
 }
 
