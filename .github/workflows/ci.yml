@@ -27,14 +27,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Typecheck
-        run: npx tsc --noEmit
-      - name: Lint
-        run: npm run lint
       - name: Generate Prisma client
         run: npx prisma generate
       - name: Apply migrations
         run: npx prisma migrate deploy
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
       - name: Unit tests
         run: npm test
       - name: Integration tests
