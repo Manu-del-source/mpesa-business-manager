@@ -184,6 +184,7 @@ export async function deliverWebhook(deliveryId: string): Promise<{
       },
       body,
       signal: AbortSignal.timeout(10_000),
+      redirect: "error",
     });
 
     const responseBody = await res.text().catch(() => "");
