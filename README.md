@@ -1,11 +1,19 @@
 # M-Pesa Business Manager
 
-An all-in-one dashboard for Kenyan SMEs — run sales, M-Pesa transactions,
-expenses, inventory and customers from a single place.
+M-Pesa Business Manager is a multi-tenant financial infrastructure platform
+for Kenyan businesses: sales and POS, M-Pesa payments (Daraja STK Push with
+fail-closed callback auth), a double-entry-style ledger with idempotency and
+audit logging, allocations, payouts, refunds, settlement and reconciliation —
+exposed both as a dashboard and an OMNI operator console with a developer
+surface, team management and RBAC.
 
 Built with **Next.js 16 (App Router)**, **Prisma 7** (query-compiler client +
 `pg` driver adapter), **PostgreSQL**, **Tailwind CSS v4**, **Radix UI**,
 **Recharts** and **Supabase Auth** (optional).
+
+Money is exact: amounts are integer minor units (BigInt) end to end, never
+floating-point. CI runs typecheck, lint, migrations, unit tests, integration
+tests against a live PostgreSQL, and a production build on every push.
 
 ---
 
